@@ -10,8 +10,8 @@ taskbar. Written in Rust with [egui](https://github.com/emilk/egui).
 If you, like me, use Proton Mail Bridge and my other project
 [iOxide](https://github.com/mrk1987/iOxide), want a better weather widget with
 data from Norway's sweetheart yr.no, and have an ultrawide monitor with unused
-real estate on your taskbar, then you are in a very small niche. But I have just
-the thing for you.
+real estate on your taskbar, then you are in a very small niche. But also; I have 
+just the thing for you!
 
 The widgets sit in the taskbar's free space as part of the bar, with no
 background of their own, so they match whatever color or effect your taskbar
