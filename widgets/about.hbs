@@ -3,13 +3,13 @@ See THIRD_PARTY_NOTICES.md for adapted code and bundled assets.
 
 {{#each licenses}}
 ================================================================================
-{{name}} ({{id}})
+{{{name}}} ({{{id}}})
 
 Used by:
 {{#each used_by}}
   - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
 {{/each}}
 
-{{text}}
+{{{text}}}
 
 {{/each}}
