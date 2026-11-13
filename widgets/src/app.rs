@@ -25,6 +25,11 @@ use codezeno_usage_core::providers::ProviderId;
 pub const BG: egui::Color32 = egui::Color32::from_rgb(0x20, 0x24, 0x2c);
 /// Every widget pill is exactly this tall so the three line up on the bar.
 pub const PILL_HEIGHT: f32 = 48.0;
+/// Text on a pill, as bright as the taskbar's own clock. egui's default
+/// label gray (140) reads dim on a dark taskbar.
+const TEXT: egui::Color32 = egui::Color32::from_gray(240);
+/// Second lines (`RichText::weak`).
+const TEXT_WEAK: egui::Color32 = egui::Color32::from_gray(175);
 /// Tallest widget element (the weather symbol); the centered content row height.
 const CONTENT_HEIGHT: f32 = 28.0;
 
@@ -54,8 +59,10 @@ pub enum Kind {
     Usage(ProviderId),
 }
 
-/// True while this process's pill is being dragged. One widget per process.
-static DRAGGING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// True while a pill is being dragged, one flag per widget kind, so pills
+/// that share a process (the default since 1.0.1) do not see each other's drags.
+static DRAGGING: [std::sync::atomic::AtomicBool; Kind::ALL.len()] =
+    [const { std::sync::atomic::AtomicBool::new(false) }; Kind::ALL.len()];
 
 /// A floating pill this close to a taskbar rests flush against it instead.
 const FLOAT_SNAP: i32 = 16;
@@ -130,6 +137,11 @@ impl Kind {
         Kind::Usage(ProviderId::Grok),
         Kind::Usage(ProviderId::Copilot),
     ];
+
+    /// Position in `Kind::ALL`.
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
+    }
 
     pub fn key(self) -> &'static str {
         match self {
@@ -215,9 +227,46 @@ pub struct WidgetApp {
     drag: Option<Drag>,
     last_dock_check: Option<Instant>,
     last_magnetic_mode: Option<bool>,
+    /// Drawn by `single.rs` in a process shared with other pills, instead of
+    /// one eframe window per process.
+    in_process: bool,
+    /// Cleared when this pill's window is gone, so its upkeep thread stops.
+    window_alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for WidgetApp {
+    fn drop(&mut self) {
+        self.window_alive
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        DRAGGING[self.kind.index()].store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl WidgetApp {
+    /// A pill for `single.rs`, drawn on the CPU in a shared process.
+    pub fn new_in_process(kind: Kind, cfg: SharedConfig) -> Self {
+        let mut app = Self::new(kind, cfg);
+        app.in_process = true;
+        app
+    }
+
+    /// The pill's window was destroyed (Explorer took the taskbar with it).
+    /// The next `frame` with a new window sets everything up again; data and
+    /// background fetching carry on.
+    pub fn window_lost(&mut self) {
+        self.window_alive
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        self.window_alive = Default::default();
+        self.hwnd = None;
+        self.applied_placement = None;
+        self.applied_round = None;
+        self.last_size = egui::Vec2::ZERO;
+        self.drag = None;
+        self.last_dock_check = None;
+        self.last_magnetic_mode = None;
+        DRAGGING[self.kind.index()].store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub fn new(kind: Kind, cfg: SharedConfig) -> Self {
         let widget: Box<dyn Widget> = match kind {
             Kind::Weather => Box::new(WeatherWidget::new(cfg.clone())),
@@ -240,6 +289,8 @@ impl WidgetApp {
             drag: None,
             last_dock_check: None,
             last_magnetic_mode: None,
+            in_process: false,
+            window_alive: Default::default(),
         }
     }
 
@@ -401,7 +452,7 @@ impl WidgetApp {
             drag.moving = true;
             // Before detaching: the upkeep thread would otherwise see a
             // taskbar placement and a free pill, and re-attach it mid-drag.
-            DRAGGING.store(true, std::sync::atomic::Ordering::SeqCst);
+            DRAGGING[self.kind.index()].store(true, std::sync::atomic::Ordering::SeqCst);
             // A desktop-pinned pill is a child window; free it to follow the cursor.
             shell::make_popup(hwnd);
         }
@@ -472,7 +523,115 @@ impl WidgetApp {
             }
         }
         // Only now that the new placement is saved may upkeep dock again.
-        DRAGGING.store(false, std::sync::atomic::Ordering::SeqCst);
+        DRAGGING[self.kind.index()].store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Apply placement changes and keep a docked pill where it belongs.
+    fn manage_window(&mut self, hwnd: HWND, state: &WidgetState, ppp: f32, moving: bool) {
+        // A placement chosen from a menu (here, the tray, or the file).
+        if !moving && self.applied_placement != Some(state.placement) {
+            match state.placement {
+                // `keep_docked` below makes the pill a child of the taskbar.
+                Placement::Taskbar => {
+                    self.last_dock_check = None;
+                }
+                Placement::Desktop | Placement::Floating => {
+                    if state.placement == Placement::Desktop {
+                        shell::pin_desktop(hwnd);
+                    } else {
+                        shell::make_popup(hwnd);
+                    }
+                    // Leaving the taskbar, the pill would stay on top of it:
+                    // hidden behind the bar on the desktop, or covering the
+                    // bar's buttons when floating. Move it just off the bar.
+                    let r = shell::screen_rect(hwnd);
+                    if let Some(bar) = shell::taskbars()
+                        .into_iter()
+                        .find(|b| shell::intersection(r, b.rect).is_some())
+                    {
+                        let h = r.bottom - r.top;
+                        let monitor = shell::monitor_rect_at(POINT {
+                            x: r.left,
+                            y: bar.rect.top,
+                        });
+                        let bar_at_top = monitor
+                            .is_some_and(|m| bar.rect.top - m.top < m.bottom - bar.rect.bottom);
+                        let y = if bar_at_top {
+                            bar.rect.bottom + 8
+                        } else {
+                            bar.rect.top - h - 8
+                        };
+                        shell::place(hwnd, r.left, y);
+                    }
+                }
+            }
+            if state.placement != Placement::Taskbar {
+                // Remember where the pill now is on screen.
+                let r = shell::screen_rect(hwnd);
+                if (state.x, state.y) != (r.left, r.top) {
+                    self.with_state(|s| {
+                        s.x = r.left;
+                        s.y = r.top;
+                    });
+                }
+            }
+            self.applied_placement = Some(state.placement);
+        }
+        // A pill that is not meant for the taskbar but is still its child is
+        // clipped to the bar and invisible anywhere else. That happens when a
+        // re-dock raced a placement change; free it at its saved position.
+        if !moving && state.placement != Placement::Taskbar && shell::on_a_taskbar(hwnd) {
+            crate::log::line(
+                self.kind.key(),
+                "was still attached to the taskbar after leaving it; detached",
+            );
+            if state.placement == Placement::Desktop {
+                shell::pin_desktop(hwnd);
+            } else {
+                shell::make_popup(hwnd);
+            }
+            shell::place(hwnd, state.x, state.y);
+        }
+        // Wait for the window to take the pill's size before docking by it.
+        let sized = self.last_size != egui::Vec2::ZERO;
+        if !moving
+            && sized
+            && state.placement == Placement::Taskbar
+            && self
+                .last_dock_check
+                .is_none_or(|t| t.elapsed() >= DOCK_CHECK)
+        {
+            self.last_dock_check = Some(Instant::now());
+            self.keep_docked(hwnd, state, ppp);
+        }
+    }
+
+    /// Start, advance or finish a press or drag of the pill.
+    fn drag_frame(&mut self, hwnd: HWND, pressed: bool) {
+        if self.drag.is_none() && (pressed || shell::fake_press_on(hwnd)) {
+            let r = shell::screen_rect(hwnd);
+            let others = Kind::ALL
+                .into_iter()
+                .filter(|k| *k != self.kind)
+                .filter_map(|k| shell::find_by_title(k.title()))
+                .collect();
+            self.drag = Some(Drag {
+                start_cursor: shell::cursor(),
+                start_origin: POINT {
+                    x: r.left,
+                    y: r.top,
+                },
+                moving: false,
+                snapped: None,
+                others,
+            });
+            // Start reading the taskbar layout now so it is there by the
+            // time the press has become a drag.
+            occupancy::set_active(true);
+        }
+        if self.drag.is_some() && !self.step_drag(hwnd) {
+            self.finish_drag(hwnd);
+        }
     }
 
     fn show_menu(&mut self) {
@@ -551,17 +710,34 @@ impl WidgetApp {
 /// Show and hide the pill from a thread of its own. A hidden window gets no
 /// paint messages, so `ui` stops running and could never show it again.
 /// Also reloads the config when another process (or the user) changes it.
-fn spawn_upkeep(kind: Kind, hwnd: HWND, cfg: SharedConfig, ctx: egui::Context) {
+///
+/// `alive` is cleared when the window is replaced or the pill is dropped; a
+/// pill drawn in a shared process (`in_process`) then just stops this thread.
+fn spawn_upkeep(
+    kind: Kind,
+    hwnd: HWND,
+    cfg: SharedConfig,
+    ctx: egui::Context,
+    in_process: bool,
+    alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
     let hwnd = hwnd.0 as isize;
+    alive.store(true, std::sync::atomic::Ordering::SeqCst);
     std::thread::spawn(move || {
         let hwnd = HWND(hwnd as *mut _);
         let mut last_mtime = crate::config::mtime();
         let mut shown: Option<bool> = None;
         loop {
+            if !alive.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
             // Destroying Explorer's taskbar can destroy its cross-process
-            // children without an orderly eframe close. Exit so the hub can
-            // recreate the root window; never keep polling a stale HWND.
+            // children without an orderly eframe close. A pill process exits
+            // so the hub can recreate it; never keep polling a stale HWND.
             if !unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)) }.as_bool() {
+                if in_process {
+                    return;
+                }
                 std::process::exit(0);
             }
             let mtime = crate::config::mtime();
@@ -572,8 +748,10 @@ fn spawn_upkeep(kind: Kind, hwnd: HWND, cfg: SharedConfig, ctx: egui::Context) {
             }
             let state = kind.state(&cfg.lock().unwrap()).clone();
             let magnetic = cfg.lock().unwrap().magnetized;
-            let dragging = DRAGGING.load(std::sync::atomic::Ordering::SeqCst);
-            if upkeep_docks(magnetic, state.placement, dragging) {
+            let dragging = DRAGGING[kind.index()].load(std::sync::atomic::Ordering::SeqCst);
+            // Finding the bar enumerates every top-level window; skip it
+            // while the pill is already part of a taskbar.
+            if upkeep_docks(magnetic, state.placement, dragging) && !shell::on_a_taskbar(hwnd) {
                 if let Some(bar) = shell::bar_for(state.monitor.as_deref()) {
                     if shell::parent_of(hwnd) != Some(bar.hwnd) {
                         shell::embed(hwnd, bar.hwnd);
@@ -601,16 +779,28 @@ impl eframe::App for WidgetApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        match self.hwnd.or_else(|| shell::hwnd_of(frame)) {
+            Some(hwnd) => self.frame(ui, Some(hwnd)),
+            None => ui.ctx().request_repaint(),
+        }
+    }
+}
+
+impl WidgetApp {
+    /// One frame of the pill. `window` is the pill's window; `None` draws
+    /// the pill off screen without touching any window (`--cpu-shot`).
+    pub fn frame(&mut self, ui: &mut egui::Ui, window: Option<HWND>) {
         let ctx = ui.ctx().clone();
-        let hwnd = match self.hwnd {
-            Some(hwnd) => hwnd,
-            None => {
-                let Some(hwnd) = shell::hwnd_of(frame) else {
-                    ctx.request_repaint();
-                    return;
-                };
+        let hwnd = match (self.hwnd, window) {
+            (Some(hwnd), _) => Some(hwnd),
+            (None, Some(hwnd)) => {
                 self.hwnd = Some(hwnd);
-                shell::hook_window(hwnd);
+                // winit's style rewrites need undoing; a window of our own
+                // (single.rs) has none, and the hook's one global host would
+                // misfire with several pills in the process.
+                if !self.in_process {
+                    shell::hook_window(hwnd);
+                }
                 shell::make_popup(hwnd);
                 let state = self.state();
                 if state.placement != Placement::Taskbar {
@@ -620,10 +810,24 @@ impl eframe::App for WidgetApp {
                         shell::embed(hwnd, bar.hwnd);
                     }
                 }
-                spawn_upkeep(self.kind, hwnd, self.cfg.clone(), ctx.clone());
-                hwnd
+                spawn_upkeep(
+                    self.kind,
+                    hwnd,
+                    self.cfg.clone(),
+                    ctx.clone(),
+                    self.in_process,
+                    self.window_alive.clone(),
+                );
+                Some(hwnd)
             }
+            (None, None) => None,
         };
+        if ui.visuals().widgets.noninteractive.fg_stroke.color != TEXT {
+            ctx.all_styles_mut(|style| {
+                style.visuals.widgets.noninteractive.fg_stroke.color = TEXT;
+                style.visuals.weak_text_color = Some(TEXT_WEAK);
+            });
+        }
         self.widget.tick();
         let ppp = ctx.pixels_per_point();
         let state = self.state();
@@ -640,82 +844,8 @@ impl eframe::App for WidgetApp {
             return;
         }
         let moving = self.drag.as_ref().is_some_and(|d| d.moving);
-
-        // A placement chosen from a menu (here, the tray, or the file).
-        if !moving && self.applied_placement != Some(state.placement) {
-            match state.placement {
-                // `keep_docked` below makes the pill a child of the taskbar.
-                Placement::Taskbar => {
-                    self.last_dock_check = None;
-                }
-                Placement::Desktop | Placement::Floating => {
-                    if state.placement == Placement::Desktop {
-                        shell::pin_desktop(hwnd);
-                    } else {
-                        shell::make_popup(hwnd);
-                    }
-                    // Leaving the taskbar, the pill would stay on top of it:
-                    // hidden behind the bar on the desktop, or covering the
-                    // bar's buttons when floating. Move it just off the bar.
-                    let r = shell::screen_rect(hwnd);
-                    if let Some(bar) = shell::taskbars()
-                        .into_iter()
-                        .find(|b| shell::intersection(r, b.rect).is_some())
-                    {
-                        let h = r.bottom - r.top;
-                        let monitor = shell::monitor_rect_at(POINT {
-                            x: r.left,
-                            y: bar.rect.top,
-                        });
-                        let bar_at_top = monitor
-                            .is_some_and(|m| bar.rect.top - m.top < m.bottom - bar.rect.bottom);
-                        let y = if bar_at_top {
-                            bar.rect.bottom + 8
-                        } else {
-                            bar.rect.top - h - 8
-                        };
-                        shell::place(hwnd, r.left, y);
-                    }
-                }
-            }
-            if state.placement != Placement::Taskbar {
-                // Remember where the pill now is on screen.
-                let r = shell::screen_rect(hwnd);
-                if (state.x, state.y) != (r.left, r.top) {
-                    self.with_state(|s| {
-                        s.x = r.left;
-                        s.y = r.top;
-                    });
-                }
-            }
-            self.applied_placement = Some(state.placement);
-        }
-        // A pill that is not meant for the taskbar but is still its child is
-        // clipped to the bar and invisible anywhere else. That happens when a
-        // re-dock raced a placement change; free it at its saved position.
-        if !moving && state.placement != Placement::Taskbar && shell::on_a_taskbar(hwnd) {
-            crate::log::line(
-                self.kind.key(),
-                "was still attached to the taskbar after leaving it; detached",
-            );
-            if state.placement == Placement::Desktop {
-                shell::pin_desktop(hwnd);
-            } else {
-                shell::make_popup(hwnd);
-            }
-            shell::place(hwnd, state.x, state.y);
-        }
-        // Wait for the window to take the pill's size before docking by it.
-        let sized = self.last_size != egui::Vec2::ZERO;
-        if !moving
-            && sized
-            && state.placement == Placement::Taskbar
-            && self
-                .last_dock_check
-                .is_none_or(|t| t.elapsed() >= DOCK_CHECK)
-        {
-            self.last_dock_check = Some(Instant::now());
-            self.keep_docked(hwnd, &state, ppp);
+        if let Some(hwnd) = hwnd {
+            self.manage_window(hwnd, &state, ppp, moving);
         }
 
         // On a taskbar the pill is square and painted the bar's own color so
@@ -724,7 +854,7 @@ impl eframe::App for WidgetApp {
             Some(d) if d.moving => d.snapped.is_some(),
             _ => state.placement == Placement::Taskbar,
         };
-        if self.applied_round != Some(!on_bar) {
+        if let Some(hwnd) = hwnd.filter(|_| self.applied_round != Some(!on_bar)) {
             self.applied_round = Some(!on_bar);
             shell::round_corners(hwnd, !on_bar);
         }
@@ -750,8 +880,12 @@ impl eframe::App for WidgetApp {
             10
         };
         let inset: i8 = if on_bar { 4 } else { card_inset };
+        // DWM rounds a floating eframe window's corners; a layered window
+        // (single.rs) gets no frame from DWM, so its card is drawn rounded.
+        let corners: u8 = if self.in_process && !on_bar { 8 } else { 0 };
         let frame_resp = egui::Frame::NONE
             .fill(fill)
+            .corner_radius(corners)
             .inner_margin(egui::Margin::symmetric(inset, 0))
             .show(ui, |ui| {
                 // Fixed width and full pill height keep every pill the same size.
@@ -833,32 +967,11 @@ impl eframe::App for WidgetApp {
 
         let pressed = resp.is_pointer_button_down_on()
             && ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
-        if self.drag.is_none() && (pressed || shell::fake_press_on(hwnd)) {
-            let r = shell::screen_rect(hwnd);
-            let others = Kind::ALL
-                .into_iter()
-                .filter(|k| *k != self.kind)
-                .filter_map(|k| shell::find_by_title(k.title()))
-                .collect();
-            self.drag = Some(Drag {
-                start_cursor: shell::cursor(),
-                start_origin: POINT {
-                    x: r.left,
-                    y: r.top,
-                },
-                moving: false,
-                snapped: None,
-                others,
-            });
-            // Start reading the taskbar layout now so it is there by the
-            // time the press has become a drag.
-            occupancy::set_active(true);
-        }
-        if self.drag.is_some() && !self.step_drag(hwnd) {
-            self.finish_drag(hwnd);
+        if let Some(hwnd) = hwnd {
+            self.drag_frame(hwnd, pressed);
         }
 
-        if resp.double_clicked() {
+        if resp.double_clicked() && !self.widget.double_click() {
             shell::open_url(&self.widget.url());
         }
         #[cfg(debug_assertions)]

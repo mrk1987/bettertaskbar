@@ -315,11 +315,15 @@ pub fn taskbars() -> Vec<Bar> {
 
 /// The bar on the named monitor, falling back to the primary bar.
 pub fn bar_for(monitor: Option<&str>) -> Option<Bar> {
-    let mut bars = taskbars();
-    let index = monitor
-        .and_then(|m| bars.iter().position(|b| b.monitor == m))
-        .unwrap_or(0);
-    (index < bars.len()).then(|| bars.swap_remove(index))
+    pick_bar(&taskbars(), monitor).cloned()
+}
+
+/// `bar_for` on a list from `taskbars`, so a caller that needs several
+/// lookups enumerates the windows once.
+pub fn pick_bar<'a>(bars: &'a [Bar], monitor: Option<&str>) -> Option<&'a Bar> {
+    monitor
+        .and_then(|m| bars.iter().find(|b| b.monitor == m))
+        .or(bars.first())
 }
 
 /// Device name and full rectangle of the monitor a window is on.

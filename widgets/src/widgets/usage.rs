@@ -74,8 +74,14 @@ fn publish(provider: ProviderId, result: &Result<UsageData, String>) {
         crate::log::line("usage", "Could not save provider status");
     }
 }
+/// A manual refresh this soon after the last reading waits for the rest of
+/// this time, so repeated double-clicks cannot become a burst of requests.
+const MANUAL_REFRESH_GAP: Duration = Duration::from_secs(30);
+
 pub struct UsageWidget {
     provider: ProviderId,
+    /// Set by a double-click; the polling thread reads again when it sees it.
+    refresh: std::sync::Arc<std::sync::atomic::AtomicBool>,
     rx: Receiver<Result<UsageData, String>>,
     data: Option<UsageData>,
     notice: Option<String>,
@@ -105,6 +111,7 @@ impl UsageWidget {
             let _ = tx.send(Ok(data));
             return Self {
                 provider,
+                refresh: Default::default(),
                 rx,
                 data: None,
                 notice: None,
@@ -112,6 +119,8 @@ impl UsageWidget {
             };
         }
 
+        let refresh = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let wanted = refresh.clone();
         std::thread::spawn(move || loop {
             if !crate::app::Kind::Usage(provider)
                 .state(&cfg.lock().unwrap())
@@ -125,10 +134,23 @@ impl UsageWidget {
             if tx.send(result).is_err() {
                 return;
             }
-            std::thread::sleep(Duration::from_secs(120));
+            // Sleep in steps, so a shorter interval chosen in the dashboard
+            // takes effect without waiting out the old one.
+            let started = std::time::Instant::now();
+            loop {
+                let elapsed = started.elapsed();
+                let manual = elapsed >= MANUAL_REFRESH_GAP
+                    && wanted.swap(false, std::sync::atomic::Ordering::SeqCst);
+                if manual || elapsed >= cfg.lock().unwrap().usage_refresh() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            wanted.store(false, std::sync::atomic::Ordering::SeqCst);
         });
         Self {
             provider,
+            refresh,
             rx,
             data: None,
             notice: Some("Loading usage…".into()),
@@ -208,6 +230,14 @@ impl Widget for UsageWidget {
         // Minimum width; the pill fits its text (see `ui`), like Weather.
         (48.0, 48.0)
     }
+    /// Read the usage again now, instead of opening the provider's page.
+    fn double_click(&mut self) -> bool {
+        self.refresh
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.notice = Some("Refreshing…".into());
+        true
+    }
+
     fn url(&self) -> String {
         match self.provider {
             ProviderId::Claude => "https://claude.ai/settings/usage",

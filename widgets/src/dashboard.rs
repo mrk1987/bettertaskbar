@@ -205,6 +205,32 @@ impl Dashboard {
             },
         );
         let current = self.cfg.lock().unwrap().clone();
+        if usage_only {
+            style::group(ui, |ui| {
+                ui.label(egui::RichText::new("Refresh").size(16.0).strong());
+                ui.horizontal(|ui| {
+                    for minutes in config::USAGE_REFRESH_CHOICES {
+                        let chosen = current.usage_refresh().as_secs() == minutes * 60;
+                        if ui
+                            .selectable_label(chosen, format!("Every {minutes} min"))
+                            .clicked()
+                            && !chosen
+                        {
+                            if let Err(error) =
+                                config::try_update(&self.cfg, |c| c.usage_refresh_minutes = minutes)
+                            {
+                                self.notice = Some((false, error));
+                            }
+                        }
+                    }
+                });
+                ui.colored_label(
+                    style::MUTED,
+                    "How often each enabled provider is asked for its usage. Less often means fewer requests to the provider.",
+                );
+            });
+            ui.add_space(12.0);
+        }
         if !usage_only {
             style::group(ui, |ui| {
                 ui.label(egui::RichText::new("Taskbar placement").size(16.0).strong());

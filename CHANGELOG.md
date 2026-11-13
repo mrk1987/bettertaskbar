@@ -3,6 +3,30 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## 1.0.1 - 2026-11-14
+
+### Changed
+
+- All widgets now run in the tray process and are drawn on the CPU. Five
+  widgets measure about 20 MiB of RAM and 0.5 to 0.7 % of one CPU core,
+  against about 275 MiB and 2.7 % in 1.0.0. The 1.0.0 behavior, one GPU
+  process per widget, is still there: start with `--process-per-widget` or
+  set `"process_per_widget": true` in `widgets.json`.
+- Widget text is near-white, like the taskbar clock; it was a dim gray.
+- Usage widgets read each provider every 5 minutes instead of every 2. The
+  Usage page in the dashboard offers 10, 15 or 30 minutes.
+- Docking checks find the taskbars once per check instead of once per widget.
+
+### Added
+
+- Double-click a usage widget to read it again at once (at most once every
+  30 seconds).
+
+### Not yet checked in the new mode
+
+- Dragging between taskbar, desktop and floating, and Pin to desktop. If
+  either misbehaves, `--process-per-widget` restores the 1.0.0 behavior.
+
 ## 1.0.0 - 2026-11-13
 
 First public release.

@@ -153,6 +153,15 @@ impl Default for WidgetState {
 #[serde(default)]
 pub struct Config {
     pub magnetized: bool,
+    /// Run each pill as its own GPU-drawn eframe process, as before 1.0.1,
+    /// instead of drawing every pill in the hub's process on the CPU
+    /// (`single.rs`). Same as starting the hub with `--process-per-widget`.
+    /// Written to the file only when on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub process_per_widget: bool,
+    /// Minutes between usage readings, per enabled provider: one of
+    /// `USAGE_REFRESH_CHOICES`. Each reading is a request to the provider.
+    pub usage_refresh_minutes: u64,
     pub usage_widgets:
         std::collections::BTreeMap<codezeno_usage_core::providers::ProviderId, WidgetState>,
     pub weather: WeatherCfg,
@@ -167,6 +176,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             magnetized: true,
+            process_per_widget: false,
+            usage_refresh_minutes: USAGE_REFRESH_CHOICES[0],
             usage_widgets: codezeno_usage_core::providers::ProviderId::ALL
                 .into_iter()
                 .map(|p| {
@@ -191,6 +202,20 @@ impl Default for Config {
 }
 
 pub type SharedConfig = Arc<Mutex<Config>>;
+
+/// The usage refresh intervals the dashboard offers, in minutes; the first is
+/// the default.
+pub const USAGE_REFRESH_CHOICES: [u64; 4] = [5, 10, 15, 30];
+
+impl Config {
+    /// Time between usage readings. Values edited by hand are kept within the
+    /// offered range, so a typo cannot hammer a provider.
+    pub fn usage_refresh(&self) -> std::time::Duration {
+        let first = USAGE_REFRESH_CHOICES[0];
+        let last = USAGE_REFRESH_CHOICES[USAGE_REFRESH_CHOICES.len() - 1];
+        std::time::Duration::from_secs(self.usage_refresh_minutes.clamp(first, last) * 60)
+    }
+}
 
 pub fn dir() -> PathBuf {
     let base = std::env::var("APPDATA")
@@ -365,6 +390,19 @@ pub fn mtime() -> Option<std::time::SystemTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_refresh_defaults_to_five_minutes_and_stays_in_range() {
+        let mut c = Config::default();
+        assert_eq!(c.usage_refresh().as_secs(), 300);
+        for (minutes, secs) in [(0, 300), (15, 900), (30, 1800), (600, 1800)] {
+            c.usage_refresh_minutes = minutes;
+            assert_eq!(c.usage_refresh().as_secs(), secs, "{minutes}");
+        }
+        // Older files without the field get the default.
+        let old: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.usage_refresh_minutes, 5);
+    }
 
     #[test]
     fn update_worker() {

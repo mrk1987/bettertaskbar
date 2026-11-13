@@ -17,7 +17,11 @@ Antigravity and Grok use their CLI sign-in. Copilot uses its CLI or GitHub CLI
 sign-in. OpenCode Go uses `OPENCODE_GO_WORKSPACE_ID` and
 `OPENCODE_GO_AUTH_COOKIE`, or `%APPDATA%\opencode-go\config.json` as described
 in the upstream provider setup. The dashboard shows connection failures and
-stale readings. Polling runs every two minutes while a provider widget is enabled.
+stale readings. Each enabled provider is asked for its usage every 5 minutes;
+the Usage page offers 10, 15 or 30 minutes for fewer requests
+(`usage_refresh_minutes` in `widgets.json`). Double-click a usage widget to
+read it again at once; within 30 seconds of the last reading it waits until
+those 30 seconds have passed.
 
 BetterTaskbar does not use inference requests or CLI prompt execution to renew
 Claude/Codex/Grok sessions. When those sessions expire, sign in again in the

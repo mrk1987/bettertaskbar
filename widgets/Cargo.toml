@@ -1,6 +1,6 @@
 [package]
 name = "bettertaskbar-widgets"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "Weather, calendar and mail widgets for the Windows taskbar"
 license = "MIT"
@@ -38,6 +38,7 @@ features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Com",
 ]

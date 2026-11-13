@@ -3,6 +3,7 @@
 mod app;
 mod caldav;
 mod config;
+mod cpu_render;
 mod dashboard;
 mod dashboard_style;
 mod http;
@@ -20,6 +21,7 @@ mod process_lock;
 mod provider_icons;
 mod rendering;
 mod shell;
+mod single;
 mod studio;
 mod theme;
 mod theme_file;
@@ -75,6 +77,11 @@ fn main() {
         std::process::exit(check(&what));
     }
     let widget = std::env::args().find_map(|a| a.strip_prefix("--widget=").map(str::to_string));
+    if let Some(path) =
+        std::env::args().find_map(|a| a.strip_prefix("--cpu-shot=").map(str::to_string))
+    {
+        std::process::exit(cpu_shot(widget.as_deref(), &path));
+    }
     match widget.as_deref() {
         Some(key) => match app::Kind::ALL.into_iter().find(|kind| kind.key() == key) {
             Some(kind) => run_widget(kind),
@@ -117,6 +124,29 @@ fn run_widget(kind: app::Kind) {
     }
 }
 
+/// `--cpu-shot=<png> --widget=<key> [--cpu-shot-wait=<s>] [--cpu-shot-scale=<f>]`:
+/// render one pill with the CPU renderer, off screen, and save it.
+fn cpu_shot(widget: Option<&str>, path: &str) -> i32 {
+    let arg = |name: &str| {
+        std::env::args().find_map(|a| a.strip_prefix(name).and_then(|v| v.parse::<f32>().ok()))
+    };
+    let Some(kind) = app::Kind::ALL
+        .into_iter()
+        .find(|kind| Some(kind.key()) == widget)
+    else {
+        println!("FAILED: name a widget with --widget=<key>");
+        return 1;
+    };
+    let wait = std::time::Duration::from_secs_f32(arg("--cpu-shot-wait=").unwrap_or(8.0));
+    match single::shot(kind, path, wait, arg("--cpu-shot-scale=").unwrap_or(1.0)) {
+        Ok(()) => 0,
+        Err(e) => {
+            println!("FAILED: {e}");
+            1
+        }
+    }
+}
+
 /// Tray hub: single instance, spawns the three widget processes, and shuts them
 /// all down when the tray quits.
 fn run_hub() {
@@ -136,6 +166,19 @@ fn run_hub() {
 
     let cfg = config::shared();
     let tray = tray::spawn(cfg.clone());
+
+    let per_process = std::env::args().any(|a| a == "--process-per-widget")
+        || cfg.lock().unwrap().process_per_widget;
+    if !per_process {
+        single::run(cfg, &tray);
+        quit_all();
+        // Let the tray remove its icon before the process ends.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !tray.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        return;
+    }
 
     if let Ok(exe) = std::env::current_exe() {
         std::thread::spawn(move || supervise(&exe, cfg));
@@ -181,7 +224,7 @@ fn supervise(exe: &std::path::Path, cfg: config::SharedConfig) {
                     .ok();
             }
         }
-        crate::magnet::arrange(&cfg, &children);
+        crate::magnet::arrange(&cfg, &crate::magnet::process_windows(&children));
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
 }

@@ -23,6 +23,26 @@ test machine, so separate processes are the simple way to get three windows.
 
 ### Memory and CPU
 
+**Since 1.0.1 the pills run in the hub's process and are drawn on the CPU**
+(`single.rs`, `cpu_render.rs`). One thread owns every pill window and its
+message loop; egui lays each pill out as before, a small rasterizer turns the
+triangles into premultiplied pixels with the same math as egui-wgpu, and
+`UpdateLayeredWindow` shows them. Fully transparent pixels get alpha 1 so the
+whole pill stays clickable. A layered child window needs Windows 8 or later
+declared in the manifest (`widgets/app.manifest`, embedded by `build.rs`).
+Measured 2026-11-14, release build, five widgets: 20 to 22 MiB private
+working set and 0.5 to 0.7 % of one core for the whole process. Two traps
+found on the way:
+
+- A docked pill's thread shares an input queue with Explorer, so waiting with
+  `MWMO_INPUTAVAILABLE` woke the loop for Explorer's own mouse input, 100 to
+  400 times a second. The loop waits for new messages only.
+- A wait time rounded down to whole milliseconds became 0 ms just before a
+  frame was due, and the loop spun. It rounds up.
+
+`--process-per-widget` keeps the model below. The rest of this section
+describes it.
+
 Measured 2026-11-13 on the release build, five widgets (weather, calendar,
 mail, two usage widgets) plus the hub, over 40 seconds:
 

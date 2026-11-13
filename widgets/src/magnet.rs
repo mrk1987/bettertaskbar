@@ -160,7 +160,15 @@ fn owned_window(kind: Kind, pid: u32) -> Option<HWND> {
     Some(hwnd)
 }
 
-pub fn arrange(cfg: &SharedConfig, children: &[(Kind, Option<std::process::Child>)]) {
+/// The windows of the widget processes the hub started.
+pub fn process_windows(children: &[(Kind, Option<std::process::Child>)]) -> Vec<(Kind, HWND)> {
+    children
+        .iter()
+        .filter_map(|(kind, child)| Some((*kind, owned_window(*kind, child.as_ref()?.id())?)))
+        .collect()
+}
+
+pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
     // Never reposition a widget under a press/drag, or another widget while
     // the user is deciding where to drop it.
     if shell::primary_button_down() {
@@ -168,10 +176,7 @@ pub fn arrange(cfg: &SharedConfig, children: &[(Kind, Option<std::process::Child
     }
     let settings = cfg.lock().unwrap().clone();
     let mut status = Status::default();
-    let windows: Vec<_> = children
-        .iter()
-        .filter_map(|(kind, child)| Some((*kind, owned_window(*kind, child.as_ref()?.id())?)))
-        .collect();
+    let windows = windows.to_vec();
     if !settings.magnetized {
         occupancy::set_magnetic(false);
         for (kind, hwnd) in windows {
@@ -190,14 +195,16 @@ pub fn arrange(cfg: &SharedConfig, children: &[(Kind, Option<std::process::Child
     }
     occupancy::set_magnetic(true);
     let mut inferred = Vec::new();
-    for bar in shell::taskbars() {
+    // One enumeration of every top-level window per tick, not one per pill.
+    let bars = shell::taskbars();
+    for bar in bars.iter().cloned() {
         let mut docked = Vec::new();
         let Some(mut taken) = occupancy::occupied(bar.hwnd, bar.rect) else {
             for (kind, _) in &windows {
                 let state = kind.state(&settings);
                 if state.placement == Placement::Taskbar
                     && state.visible
-                    && shell::bar_for(state.monitor.as_deref())
+                    && shell::pick_bar(&bars, state.monitor.as_deref())
                         .is_some_and(|target| target.hwnd == bar.hwnd)
                 {
                     status
@@ -214,7 +221,7 @@ pub fn arrange(cfg: &SharedConfig, children: &[(Kind, Option<std::process::Child
         });
         for &(kind, hwnd) in &windows {
             let state = kind.state(&settings);
-            let target = shell::bar_for(state.monitor.as_deref());
+            let target = shell::pick_bar(&bars, state.monitor.as_deref());
             if state.visible
                 && state.placement == Placement::Taskbar
                 && target

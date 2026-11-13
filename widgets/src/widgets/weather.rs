@@ -71,7 +71,10 @@ fn poll_loop(cfg: SharedConfig, tx: mpsc::Sender<WeatherData>) {
         if let Some(place) = place.clone() {
             if due || last_place.as_ref() != Some(&place) {
                 if let Some(data) = fetch(&place) {
-                    let _ = tx.send(data);
+                    // The pill is gone (disabled in a shared process): stop.
+                    if tx.send(data).is_err() {
+                        return;
+                    }
                 }
                 last = Some(Instant::now());
                 last_place = Some(place);

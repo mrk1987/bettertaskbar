@@ -1,7 +1,9 @@
 # BetterTaskbar
 
-Weather, your next calendar event and unread mail, right on the Windows 11
-taskbar. Written in Rust with [egui](https://github.com/emilk/egui).
+Small widgets that live in the empty space on your Windows 11 taskbar:
+weather, your next calendar event, unread mail, and how much of your AI
+coding plan is left. They sit on the bar with no background of their own,
+so they match whatever color or effect your taskbar has.
 
 [![CI](https://github.com/mrk1987/bettertaskbar/actions/workflows/ci.yml/badge.svg)](https://github.com/mrk1987/bettertaskbar/actions/workflows/ci.yml)
 
@@ -13,57 +15,111 @@ data from Norway's sweetheart yr.no, and have an ultrawide monitor with unused
 real estate on your taskbar, then you are in a very small niche. But also; I have 
 just the thing for you!
 
-The widgets sit in the taskbar's free space as part of the bar, with no
-background of their own, so they match whatever color or effect your taskbar
-has. Drag them anywhere on the bar, or off it to float on the desktop.
+## Widgets
 
-## The widgets
-
-| Widget | Shows | Double-click opens |
+| Widget | Shows | Double-click |
 | --- | --- | --- |
-| [Weather](docs/weather.md) | Yr symbol, next 24 hours' high and low, precipitation | The forecast on yr.no |
-| [Calendar](docs/calendar.md) | What is on now and what is next, from any CalDAV server | Proton Calendar |
-| [Mail](docs/mail.md) | The newest unread subject, rotating, and the unread count | Proton Mail |
+| [Weather](docs/weather.md) | Yr symbol, the next 24 hours' high and low, precipitation | Opens the forecast on yr.no |
+| [Calendar](docs/calendar.md) | What is on now and what is next, from any CalDAV server | Opens Proton Calendar |
+| [Mail](docs/mail.md) | Unread count and the newest unread subjects, rotating | Opens Proton Mail |
+| [Usage](docs/dashboard.md) | Session and weekly use of Claude Code, Codex, Antigravity, OpenCode Go, Cursor, Grok Build or GitHub Copilot | Reads the usage again |
 
-The calendar and mail widgets need an account. They were built for Proton
-through [iOxide](https://github.com/mrk1987/iOxide) (calendar) and Proton Mail
-Bridge (mail), but any CalDAV or IMAP server works.
+Weather works out of the box. Calendar and mail need an account: they were
+built for Proton through iOxide and Proton Mail Bridge, but any CalDAV or IMAP
+server works. Usage widgets are off by default and reuse the sign-in of each
+tool's own app or CLI.
 
 Ideas for more widgets are welcome:
 [open an issue](https://github.com/mrk1987/bettertaskbar/issues/new) and say
 what you would like to see on your taskbar.
 
-## Moving them
-
-Press anywhere on a widget and drag. Near a taskbar it snaps into a free gap:
-never onto the Start button, your app icons, the notification area or another
-widget. Release it there and it docks. Release it anywhere else and it floats
-where you dropped it.
-
-A docked widget remembers its distance from the notification area, so it keeps
-its place when tray icons come and go or the resolution changes. It works on
-secondary monitors too. This follows the behavior of
-[Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor).
-
 ## Install
-
-You need Windows 10 or 11 and a GPU with DirectX 12.
 
 1. Download `bettertaskbar-<version>-windows-x64.zip` from the
    [latest release](https://github.com/mrk1987/bettertaskbar/releases/latest)
    and unzip it anywhere.
-2. Run `bettertaskbar-widgets.exe`.
+2. Run `bettertaskbar-widgets.exe`. A tray icon and the default widgets appear.
 
 The program is not code-signed, so Windows SmartScreen warns the first time:
-choose **More info**, then **Run anyway**. Each release lists the SHA-256 of the
-zip if you want to check your download. There is no installer and no
-auto-start; add a shortcut to `shell:startup` if you want the widgets at
-sign-in.
+choose **More info**, then **Run anyway**. Each release lists the zip's
+SHA-256. There is no installer; to start the widgets at sign-in, put a
+shortcut in `shell:startup`.
 
-That starts a tray icon and the three default widgets. Quit from the tray icon,
-or from any widget's right-click menu.
+Requires Windows 10 or 11. The dashboard window uses DirectX 12.
 
-To build it yourself you need [Rust](https://rustup.rs) (stable):
+## Using it
+
+- **Move:** press anywhere on a widget and drag. Near the taskbar it snaps
+  into a free gap, never over Start, your app icons, the notification area or
+  another widget. Release it there and it docks; release it anywhere else and
+  it floats.
+- **Stay put:** a docked widget remembers its distance from the notification
+  area, so it keeps its place when tray icons come and go or the resolution
+  changes. Docked widgets pack toward the nearest edge of their gap
+  ("magnetic"); switch that off in the dashboard to keep exact positions.
+- **Right-click** a widget for placement, hiding, settings, and (weather) the
+  place to show.
+- **Quit** from the tray icon or any widget's right-click menu.
+
+## Dashboard
+
+Click the tray icon, or run `bettertaskbar-widgets.exe --dashboard`.
+
+- **Widgets:** switch each widget on or off.
+- **Weather:** search for places, keep favorites, or enter coordinates.
+- **Calendar / Mail:** enter CalDAV and IMAP settings and test them.
+- **Usage:** choose how often providers are read: every 5 (default), 10, 15
+  or 30 minutes.
+- **Theme Studio:** redesign any widget with text, icons, rectangles and
+  progress bars bound to live data; import and export themes.
+
+Everything is saved in `%APPDATA%\BetterTaskbar\widgets.json`. See the
+[dashboard guide](docs/dashboard.md) and the
+[configuration guide](docs/configuration.md).
+
+## Privacy
+
+- No telemetry. The widgets talk only to MET Norway and Yr (weather),
+  Open-Meteo (place search), the CalDAV and IMAP servers you configure, and the
+  usage APIs of the providers you switch on.
+- Mail is opened read-only; nothing is marked as read.
+- Calendar and mail passwords are stored as plain text in `widgets.json`.
+  Keep that file private. Theme exports never include settings or passwords.
+
+## Resource use
+
+All widgets run inside the tray program and are drawn on the CPU. Five
+widgets measure about 20 MiB of RAM and under 1 % of one CPU core.
+`--process-per-widget` (or `"process_per_widget": true`) brings back the 1.0.0
+design, one GPU process per widget, at about 55 MiB each. The measurements
+are in [docs/architecture.md](docs/architecture.md#memory-and-cpu).
+
+## Limits
+
+- Only horizontal taskbars are dock targets.
+- Text and icons are drawn for a dark taskbar.
+- Magnetic placement follows taskbar changes after a short delay; changes the
+  shell does not announce can take up to 30 seconds.
+- Revealing an auto-hidden taskbar with the mouse has not been checked
+  ([#1](https://github.com/mrk1987/bettertaskbar/issues/1)).
+
+## Troubleshooting
+
+These print what a widget would show, or why it cannot (pipe to `more`; the
+program has no console of its own):
+
+```sh
+bettertaskbar-widgets.exe --check=calendar | more
+bettertaskbar-widgets.exe --check=mail | more
+bettertaskbar-widgets.exe --check=taskbar | more
+bettertaskbar-widgets.exe --check=docking | more
+```
+
+Errors are logged to `%APPDATA%\BetterTaskbar\widgets.log`.
+
+## Build from source
+
+With [Rust](https://rustup.rs) (stable):
 
 ```sh
 git clone https://github.com/mrk1987/bettertaskbar.git
@@ -71,91 +127,18 @@ cd bettertaskbar/widgets
 cargo run --release
 ```
 
-## Dashboard
-
-Click the tray icon, or choose **Dashboard…** from its menu. You can also run:
-
-```sh
-bettertaskbar-widgets.exe --dashboard
-```
-
-- **Widgets:** enable or disable Weather, Calendar, Mail, Claude Code, Codex,
-  Antigravity, OpenCode Go, Cursor, Grok Build and GitHub Copilot. Disabling a
-  widget stops its process and background fetching.
-- **Weather:** search for places, manage favorites, or enter coordinates.
-- **Calendar / Mail:** enter CalDAV and IMAP connection settings and test them.
-- **Usage providers:** reuse each provider's existing app or CLI sign-in. These
-  widgets are off by default. Their provider polling is adapted from CodeZeno's
-  MIT-licensed Claude Code Usage Monitor; the separate monitor is not needed.
-- **Theme Studio:** edit each widget independently using a canvas, layers and
-  property inspector. Add text, icons, rectangles and progress bars; drag,
-  resize, reorder, change colors, bind live data, and import/export themes.
-  **Apply theme** updates that widget. **Use original** restores its built-in
-  appearance. The studio preview uses sample data.
-
-Settings are saved locally in `%APPDATA%\BetterTaskbar\widgets.json`. Passwords
-are masked in the dashboard but stored as plain text in this file. Theme exports
-contain the visual layout, without connection settings or credentials.
-See [the dashboard guide](docs/dashboard.md) and [configuration guide](docs/configuration.md).
-
-Diagnostic commands are still available:
-
-```sh
-bettertaskbar-widgets.exe --check=calendar | more
-bettertaskbar-widgets.exe --check=mail | more
-bettertaskbar-widgets.exe --check=taskbar | more
-```
-
-## How it works
-
-Each widget is its own small process, started and watched by a tray hub.
-
-- **On the taskbar:** the window is made a child of `Shell_TrayWnd`. That is
-  what keeps it visible when the taskbar is clicked, which lifts the taskbar
-  above every ordinary window.
-- **Transparency:** wgpu presents through a DirectComposition visual, so the
-  window has real alpha and the taskbar shows through. Renderers use smaller
-  allocation pools and 4,096 resource bindings rather than wgpu's default
-  one-million-slot DX12 heaps. Each enabled widget still has its own renderer,
-  which is where the memory goes (see Limits).
-- **Free space:** Windows 11 draws the taskbar with XAML, so its buttons are not
-  windows. UI Automation reports their rectangles. Magnetic placement caches
-  that layout, refreshing after application windows change, taskbar clicks or
-  taskbar geometry changes, with a 30-second fallback. Faster sampling runs
-  only while dragging a widget.
-- **Data:** the calendar is read with plain CalDAV discovery and `REPORT`
-  queries, including time zones and recurring events. Mail is read over IMAP in
-  read-only mode.
-
-The details, including the dead ends, are in
-[docs/architecture.md](docs/architecture.md).
-
-## Limits
-
-- Only horizontal taskbars are dock targets.
-- Magnetic placement follows taskbar changes after a short delay. Shell-only
-  changes that escape detection can take up to 30 seconds. Unmagnetised widgets
-  keep their manual position when app icons grow toward them.
-- Text and icons are drawn for a dark taskbar.
-- Each enabled widget uses about 55 MiB of RAM, nearly all of it the GPU
-  renderer a process needs to draw a see-through window. Five widgets measure
-  about 275 MiB and 3 % of one CPU core. The numbers and the alternatives are
-  in [docs/architecture.md](docs/architecture.md#memory-and-cpu).
-- With an auto-hiding taskbar the widgets hide and return with the bar. This
-  was checked by switching the setting, not yet by revealing the bar with the
-  mouse ([#1](https://github.com/mrk1987/bettertaskbar/issues/1)).
-- Credentials are stored as plain text in `widgets.json`. Keep it private.
+How it works, including the approaches that failed, is in
+[docs/architecture.md](docs/architecture.md). Contributions: see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-- Weather data from [MET Norway](https://api.met.no) (CC BY 4.0), with icons
-  from [Yr](https://www.yr.no).
-- Provider polling and dashboard styling are adapted from CodeZeno’s MIT-licensed
-  Claude Code Usage Monitor. Full copyright and license notices are in
+- Weather data from [MET Norway](https://api.met.no) (CC BY 4.0), icons from
+  [Yr](https://www.yr.no).
+- Docking, dragging, provider polling and dashboard styling follow or adapt
+  [Claude Code Usage Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor)
+  by CodeZeno (MIT). Full notices are in
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- The docking and drag behavior follows
-  [Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor)
-  by CodeZeno (MIT).
 
 ## License
 

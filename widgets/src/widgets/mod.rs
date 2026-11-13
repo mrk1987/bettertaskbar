@@ -18,6 +18,10 @@ pub trait Widget {
     }
     fn size(&self) -> (f32, f32);
     fn url(&self) -> String;
+    /// A double-click on the pill. Returns false to open `url` instead.
+    fn double_click(&mut self) -> bool {
+        false
+    }
     fn ui(&mut self, ui: &mut egui::Ui, icons: &mut IconCache);
 }
 
