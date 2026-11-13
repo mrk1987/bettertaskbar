@@ -1,0 +1,23 @@
+# Build output
+/target/
+/widgets/target/
+**/*.rs.bk
+
+# Debug symbols and crash dumps
+*.pdb
+*.ilk
+*.dmp
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local screenshots (docs/screenshots is intentional and tracked)
+/shots/
+
+# Provider-core standalone build output
+/widgets/vendor/codezeno-usage-core/target/
+/widgets/vendor/codezeno-usage-core/Cargo.lock

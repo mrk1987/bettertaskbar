@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: widgets
+    steps:
+      - uses: actions/checkout@v7
+      # The toolchain file at the repository root selects stable + rustfmt + clippy.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: widgets
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace -- --test-threads=1
+      - run: cargo build --release
+      # The release workflow ships this file; fail here, not on a tag, when a
+      # new dependency brings a license that about.toml does not accept.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - run: cargo about generate about.hbs -o target/THIRD_PARTY_LICENSES.txt

@@ -1,0 +1,17 @@
+[package]
+name = "codezeno-usage-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3.5", default-features = false, features = ["native-tls-no-default", "json"] }
+semver = "1"
+httpdate = "1"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+
+[dev-dependencies]
+tempfile = "3"
