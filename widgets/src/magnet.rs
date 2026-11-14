@@ -171,7 +171,7 @@ pub fn process_windows(children: &[(Kind, Option<std::process::Child>)]) -> Vec<
 pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
     // Never reposition a widget under a press/drag, or another widget while
     // the user is deciding where to drop it.
-    if shell::primary_button_down() {
+    if shell::primary_button_down() || crate::app::any_dragging() {
         return;
     }
     let settings = cfg.lock().unwrap().clone();

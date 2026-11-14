@@ -3,6 +3,18 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- CPU-rendered widgets keep their taskbar parent while dragged along the
+  bar, and detach when dragged away. Snapped previews no longer rely on a
+  floating window that Explorer can cover.
+- CPU-mode window upkeep runs on the window thread. Magnetic placement
+  waits until the release frame has finished saving the drop.
+- A drop whose taskbar disappeared falls back to floating instead of
+  recording a docking operation that failed.
+
 ## 1.0.1 - 2026-11-14
 
 ### Changed

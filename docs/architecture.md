@@ -40,6 +40,12 @@ found on the way:
 - A wait time rounded down to whole milliseconds became 0 ms just before a
   frame was due, and the loop spun. It rounds up.
 
+The CPU loop also owns window parenting and visibility, including hidden
+pills; it must not start the legacy per-widget upkeep threads. Otherwise
+upkeep can race a drag's detach/attach operations. Magnetic packing runs
+after widget frames and waits while any drop is still being committed,
+even if the physical mouse button is already up.
+
 `--process-per-widget` keeps the model below. The rest of this section
 describes it.
 
@@ -151,13 +157,15 @@ show this kind of difference, so trust your eyes over captures here.
 
 `app.rs` handles a press itself instead of using a title-bar drag:
 
-1. A press past the system drag threshold (`SM_CXDRAG`) starts a drag and turns
-   the widget into a free topmost popup that follows the cursor.
+1. A press past the system drag threshold (`SM_CXDRAG`) starts a drag.
 2. Within 20 px of a taskbar it looks for a free gap. Taken are the shell's
    controls, read by `occupancy.rs` through UI Automation (Windows 11 draws the
    taskbar with XAML, so its buttons are not windows), the notification area
    and the other widgets. The widget snaps in when 67% of it lies in a gap, and
-   stays snapped down to 45%, so it does not flicker at the edge.
+   stays snapped down to 45%, so it does not flicker at the edge. A snapped
+   preview stays a taskbar child so Explorer cannot cover it. Leaving the
+   snap target detaches it into a free topmost popup; it must detach before
+   moving outside the taskbar, or the parent clips it away.
 3. On release it docks if snapped, and floats where dropped otherwise.
 
 A docked widget stores its distance from the notification area and its
@@ -214,6 +222,12 @@ row is therefore an explicit 28 px rectangle centered in the 48 px widget
   and concurrent config writes from four processes. Two native tests build
   disposable menus/windows to check command mapping, parent movement,
   destruction and failed docking. They never touch Explorer or a server.
+- CPU drag regressions exercise 100 rounds of on-bar movement, detaching,
+  reattaching and layered presentation across two disposable hosts, while
+  checking another pill stays in place. An isolated subprocess checks
+  release-time packing suppression, floating drops and failed docking with
+  its own temporary configuration. These establish native state and pixel
+  submission, not visual acceptance of mouse dragging against Explorer.
 - `tools/explorer-restart-test.ps1` stops Explorer and reports whether the
   docked widgets come back; `tools/autohide-test.ps1` switches taskbar
   auto-hide on and back. Both passed on 2026-11-13: after an Explorer restart

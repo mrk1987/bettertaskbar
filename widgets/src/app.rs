@@ -64,6 +64,13 @@ pub enum Kind {
 static DRAGGING: [std::sync::atomic::AtomicBool; Kind::ALL.len()] =
     [const { std::sync::atomic::AtomicBool::new(false) }; Kind::ALL.len()];
 
+/// Includes the release frame, until the drop has been committed.
+pub fn any_dragging() -> bool {
+    DRAGGING
+        .iter()
+        .any(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+}
+
 /// A floating pill this close to a taskbar rests flush against it instead.
 const FLOAT_SNAP: i32 = 16;
 
@@ -453,8 +460,8 @@ impl WidgetApp {
             // Before detaching: the upkeep thread would otherwise see a
             // taskbar placement and a free pill, and re-attach it mid-drag.
             DRAGGING[self.kind.index()].store(true, std::sync::atomic::Ordering::SeqCst);
-            // A desktop-pinned pill is a child window; free it to follow the cursor.
-            shell::make_popup(hwnd);
+            // Keep an on-bar drag hosted. place_preview detaches only when
+            // the cursor actually leaves the snap target.
         }
         let r = shell::screen_rect(hwnd);
         let (w, h) = (r.right - r.left, r.bottom - r.top);
@@ -467,14 +474,19 @@ impl WidgetApp {
         };
         match Self::snap_target(drag, free, cursor) {
             Some((bar, sx, sy)) => {
-                shell::place(hwnd, sx, sy);
+                // Explorer can cover even a topmost popup. Host the snapped
+                // preview too, so it shares the taskbar's z-order.
+                if !shell::place_preview(hwnd, Some(bar.hwnd), sx, sy) {
+                    drag.snapped = None;
+                    return true;
+                }
                 drag.snapped = Some(bar);
             }
             None => {
                 // Not docking: never hover over or behind a taskbar; rest
                 // on its edge instead, so the drop shows where it will land.
                 let (x, y) = float_position(x, y, w, h);
-                shell::place(hwnd, x, y);
+                shell::place_preview(hwnd, None, x, y);
                 drag.snapped = None;
             }
         }
@@ -490,7 +502,10 @@ impl WidgetApp {
         }
         let r = shell::screen_rect(hwnd);
         let (w, h) = (r.right - r.left, r.bottom - r.top);
-        match drag.snapped {
+        let snapped = drag
+            .snapped
+            .filter(|bar| shell::parent_of(hwnd) == Some(bar.hwnd) || shell::embed(hwnd, bar.hwnd));
+        match snapped {
             Some(bar) => {
                 let gap = (bar.tray_left - r.right).max(0);
                 let offset = if gap <= TRAY_SNAP { 0 } else { gap };
@@ -505,6 +520,7 @@ impl WidgetApp {
                 self.applied_placement = Some(Placement::Taskbar);
             }
             None => {
+                shell::make_popup(hwnd);
                 // Keep the whole pill on the monitor it was dropped on.
                 let (mut x, mut y) = (r.left, r.top);
                 if let Some(m) = shell::monitor_rect_at(shell::cursor()) {
@@ -711,14 +727,13 @@ impl WidgetApp {
 /// paint messages, so `ui` stops running and could never show it again.
 /// Also reloads the config when another process (or the user) changes it.
 ///
-/// `alive` is cleared when the window is replaced or the pill is dropped; a
-/// pill drawn in a shared process (`in_process`) then just stops this thread.
+/// Only the legacy eframe process mode needs this worker. The CPU mode's
+/// window-owning loop also runs while a pill is hidden.
 fn spawn_upkeep(
     kind: Kind,
     hwnd: HWND,
     cfg: SharedConfig,
     ctx: egui::Context,
-    in_process: bool,
     alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let hwnd = hwnd.0 as isize;
@@ -735,9 +750,6 @@ fn spawn_upkeep(
             // children without an orderly eframe close. A pill process exits
             // so the hub can recreate it; never keep polling a stale HWND.
             if !unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)) }.as_bool() {
-                if in_process {
-                    return;
-                }
                 std::process::exit(0);
             }
             let mtime = crate::config::mtime();
@@ -810,14 +822,15 @@ impl WidgetApp {
                         shell::embed(hwnd, bar.hwnd);
                     }
                 }
-                spawn_upkeep(
-                    self.kind,
-                    hwnd,
-                    self.cfg.clone(),
-                    ctx.clone(),
-                    self.in_process,
-                    self.window_alive.clone(),
-                );
+                if !self.in_process {
+                    spawn_upkeep(
+                        self.kind,
+                        hwnd,
+                        self.cfg.clone(),
+                        ctx.clone(),
+                        self.window_alive.clone(),
+                    );
+                }
                 Some(hwnd)
             }
             (None, None) => None,
@@ -846,6 +859,20 @@ impl WidgetApp {
         let moving = self.drag.as_ref().is_some_and(|d| d.moving);
         if let Some(hwnd) = hwnd {
             self.manage_window(hwnd, &state, ppp, moving);
+            if self.in_process {
+                // The CPU loop keeps drawing hidden pills. Native window
+                // updates belong here, not on a racing upkeep thread.
+                let magnetic = self.cfg.lock().unwrap().magnetized;
+                if !magnetic
+                    || state.placement != Placement::Taskbar
+                    || self.drag.is_some()
+                    || !state.visible
+                    || !shell::on_a_taskbar(hwnd)
+                {
+                    shell::set_visible(hwnd, state.visible);
+                }
+                // arrange() owns idle magnetic pills' visibility.
+            }
         }
 
         // On a taskbar the pill is square and painted the bar's own color so
@@ -1031,5 +1058,108 @@ mod tests {
         assert!(!upkeep_docks(true, Placement::Floating, false));
         assert!(!upkeep_docks(true, Placement::Desktop, false));
         assert!(!upkeep_docks(false, Placement::Taskbar, false));
+    }
+
+    #[test]
+    fn drag_release_uses_native_parent_state_and_defers_packing() {
+        // Isolate config writes in a child process rather than changing the
+        // test runner's APPDATA or touching the user's saved placements.
+        let scratch =
+            std::env::temp_dir().join(format!("bettertaskbar-drag-{}", std::process::id()));
+        std::fs::create_dir(&scratch).unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "app::tests::drag_release_worker",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env("APPDATA", &scratch)
+            .env("BTW_DRAG_TEST_CHILD", "1")
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(&scratch).unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    fn drag_release_worker() {
+        if std::env::var("BTW_DRAG_TEST_CHILD").as_deref() != Ok("1") {
+            return;
+        }
+        use windows::core::{w, PCWSTR};
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        let cfg = crate::config::shared();
+        let mut app = WidgetApp::new_in_process(Kind::Mail, cfg.clone());
+        unsafe {
+            let create = || {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    PCWSTR::null(),
+                    WS_POPUP,
+                    100,
+                    100,
+                    160,
+                    48,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap()
+            };
+            let host = create();
+            let pill = create();
+            let bar = Bar {
+                hwnd: host,
+                rect: rect(100, 100, 1100, 148),
+                tray_left: 1000,
+                monitor: "test".into(),
+            };
+            let start = |snapped| Drag {
+                start_cursor: POINT::default(),
+                start_origin: POINT::default(),
+                moving: true,
+                snapped,
+                others: Vec::new(),
+            };
+            assert!(shell::place_preview(pill, Some(host), 200, 100));
+            app.drag = Some(start(Some(bar.clone())));
+            DRAGGING[Kind::Mail.index()].store(true, std::sync::atomic::Ordering::SeqCst);
+            // The physical button may already be up; the drop is still pending.
+            crate::magnet::arrange(&cfg, &[(Kind::Mail, pill)]);
+            assert!(!crate::config::dir().join("dock-status.json").exists());
+            app.finish_drag(pill);
+            assert_eq!(shell::parent_of(pill), Some(host));
+            assert_eq!(app.state().placement, Placement::Taskbar);
+            assert_eq!(app.state().manual_bar_offset, Some(100));
+            assert!(!any_dragging());
+
+            // A free drop must detach even if the last preview was hosted.
+            app.drag = Some(start(None));
+            app.finish_drag(pill);
+            assert_eq!(shell::parent_of(pill), None);
+            assert_eq!(app.state().placement, Placement::Floating);
+
+            // Explorer can destroy a snap target before the release frame.
+            DestroyWindow(host).unwrap();
+            app.drag = Some(start(Some(bar)));
+            app.finish_drag(pill);
+            assert_eq!(shell::parent_of(pill), None);
+            assert_eq!(app.state().placement, Placement::Floating);
+            assert_eq!(app.applied_placement, Some(Placement::Floating));
+            let persisted = crate::config::shared();
+            assert_eq!(
+                persisted.lock().unwrap().mail_widget.placement,
+                Placement::Floating
+            );
+            DestroyWindow(pill).unwrap();
+        }
     }
 }

@@ -410,7 +410,12 @@ impl Pill {
     fn frame(&mut self) {
         *self.wake.lock().unwrap() = None;
         self.last_frame = Some(Instant::now());
-        let window = is_window(self.hwnd).then_some(self.hwnd);
+        // Do not hand WidgetApp a cached HWND Explorer has destroyed.
+        // supervise() will replace it and reset placement/drag state.
+        if !is_window(self.hwnd) {
+            return;
+        }
+        let window = Some(self.hwnd);
         let scale = scale_of(self.hwnd);
         let events = std::mem::take(&mut self.events);
         let (canvas, repaint) = self.painter.frame(&mut self.app, window, events, scale);
@@ -472,8 +477,8 @@ fn deliver_input(pills: &mut [Pill]) {
     }
 }
 
-/// Start and stop pills as widgets are enabled and disabled, replace windows
-/// Explorer destroyed, and let the magnet place the docked ones.
+/// Start and stop pills as widgets are enabled and disabled, and replace
+/// windows Explorer destroyed. Packing runs after their frames.
 fn supervise(cfg: &SharedConfig, pills: &mut Vec<Pill>, thread: u32) {
     crate::config::refresh(cfg);
     let settings = cfg.lock().unwrap().clone();
@@ -491,8 +496,6 @@ fn supervise(cfg: &SharedConfig, pills: &mut Vec<Pill>, thread: u32) {
             _ => {}
         }
     }
-    let windows: Vec<_> = pills.iter().map(|p| (p.kind, p.hwnd)).collect();
-    crate::magnet::arrange(cfg, &windows);
 }
 
 /// Run every enabled pill on this thread until the hub quits.
@@ -519,7 +522,8 @@ pub fn run(cfg: SharedConfig, tray: &std::thread::JoinHandle<()>) {
                 DispatchMessageW(&msg);
             }
         }
-        if Instant::now() >= next_supervise {
+        let supervising = Instant::now() >= next_supervise;
+        if supervising {
             if crate::QUITTING.load(std::sync::atomic::Ordering::SeqCst) || tray.is_finished() {
                 break;
             }
@@ -531,6 +535,13 @@ pub fn run(cfg: SharedConfig, tray: &std::thread::JoinHandle<()>) {
             if pill.due().is_some_and(|at| at <= Instant::now()) {
                 pill.frame();
             }
+        }
+        // Frames finish drops and apply the current placement first. Packing
+        // an old Taskbar state before its release frame could hide a popup
+        // or repack the gap the user is dropping into.
+        if supervising {
+            let windows: Vec<_> = pills.iter().map(|p| (p.kind, p.hwnd)).collect();
+            crate::magnet::arrange(&cfg, &windows);
         }
         let next = pills
             .iter()
@@ -597,4 +608,93 @@ pub fn shot(kind: Kind, path: &str, wait: Duration, scale: f32) -> Result<(), St
         image::ColorType::Rgba8,
     )
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shell;
+
+    #[test]
+    fn layered_pills_keep_their_pixels_and_position_across_repeated_reparenting() {
+        // Real layered windows, but disposable hosts: no Explorer, live
+        // configuration, provider fetching or injected desktop input.
+        assert!(register_class());
+        unsafe {
+            let host = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                100,
+                100,
+                1000,
+                48,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let other_host = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                -1200,
+                200,
+                1000,
+                48,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let first = create_window(Kind::Mail).unwrap();
+            let second = create_window(Kind::Calendar).unwrap();
+            let mut surface = Surface::new(160, 48).unwrap();
+            let mut canvas = Canvas::new(160, 48);
+            canvas.pixels.fill([100, 50, 25, 128]);
+            surface.present(first, &canvas).unwrap();
+            surface.present(second, &canvas).unwrap();
+            assert!(shell::embed(second, host));
+            shell::place(second, 400, 100);
+            let untouched = shell::screen_rect(second);
+            for i in 0..100 {
+                let (parent, x, y) = if i % 2 == 0 {
+                    (host, 200, 100)
+                } else {
+                    (other_host, -1100, 200)
+                };
+                assert!(shell::place_preview(first, Some(parent), x, y));
+                surface.present(first, &canvas).unwrap();
+                assert_eq!(shell::parent_of(first), Some(parent));
+                let r = shell::screen_rect(first);
+                assert_eq!(
+                    (r.left, r.top, r.right - r.left, r.bottom - r.top),
+                    (x, y, 160, 48)
+                );
+                // Moving along the taskbar must keep the hosted preview,
+                // rather than briefly becoming a popup behind Explorer.
+                assert!(shell::place_preview(first, Some(parent), x + 20, y));
+                assert_eq!(shell::parent_of(first), Some(parent));
+                surface.present(first, &canvas).unwrap();
+                assert!(shell::place_preview(first, None, 600, 600));
+                surface.present(first, &canvas).unwrap();
+                assert_eq!(shell::parent_of(first), None);
+                assert_eq!(GetWindowLongPtrW(first, GWL_STYLE) as u32 & WS_CHILD.0, 0);
+                let r = shell::screen_rect(first);
+                assert_eq!((r.left, r.top), (600, 600));
+                assert_eq!(shell::parent_of(second), Some(host));
+                let r = shell::screen_rect(second);
+                assert_eq!((r.left, r.top), (untouched.left, untouched.top));
+                assert_eq!(*surface.bits, 0x8064_3219);
+            }
+            DestroyWindow(first).unwrap();
+            DestroyWindow(host).unwrap();
+            DestroyWindow(other_host).unwrap();
+            assert!(!is_window(second));
+        }
+    }
 }

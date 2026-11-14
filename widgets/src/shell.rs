@@ -494,6 +494,22 @@ pub fn place(hwnd: HWND, x: i32, y: i32) {
     }
 }
 
+/// A snapped drag preview must be hosted to stay above Explorer, while a
+/// free preview must be detached to avoid its old host clipping it.
+pub fn place_preview(hwnd: HWND, host: Option<HWND>, x: i32, y: i32) -> bool {
+    match host {
+        Some(host) if parent_of(hwnd) != Some(host) => {
+            if !embed(hwnd, host) {
+                return false;
+            }
+        }
+        None if parent_of(hwnd).is_some() => make_popup(hwnd),
+        _ => {}
+    }
+    place(hwnd, x, y);
+    true
+}
+
 /// Debug builds only: when `BTW_FAKE_INPUT` names a file holding
 /// `x y down title-word` (`down` is 0 or 1), the cursor position and button
 /// state come from it, for the pill whose window title ends in that word.
