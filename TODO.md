@@ -15,7 +15,8 @@ action.
 - [ ] **Next Departure:** show upcoming bus/train departures for saved stops,
   with line/direction filtering, countdowns and delays. Include a simple traffic
   indicator for the selected bus route or journey: **None / Low / Medium /
-  High**, alongside the departure information. Keep road disruptions within
+  High**. Keep the widget on two lines to maintain a consistent compact size:
+  line 1 `Bus 31 · 6 min`, line 2 `Traffic: High`. Keep road disruptions within
   this widget rather than adding a separate traffic widget or map. Use
   **Unknown** when relevant traffic data is unavailable or stale; do not imply
   clear roads. Select and verify transport and route-relevant traffic sources
