@@ -11,6 +11,25 @@ unrelated changes made by another process. Failed writes are shown as errors.
 **Test connection** checks the entered settings without saving them. Mail uses
 read-only IMAP commands; calendar checks list upcoming events.
 
+## Double-click actions
+
+Expand **Double-click** under any widget on the Widgets or Usage page, or use
+the action controls on its Weather, Calendar or Mail settings page.
+
+- **Open URL:** enter an `http://` or `https://` address. Leave it blank to
+  use the widget's default website. Weather's default follows its place.
+- **Refresh widget:** fetch that widget's data again. Repeated requests are
+  combined and wait for the 30-second cooldown after the last reading.
+- **Launch app:** browse to an application's `.exe` file, or enter its full
+  path without quotes or command-line arguments.
+
+Choose **Apply action** to save just that widget's action. URL and app targets
+are kept when switching modes. The widget's right-click **Double-click
+action** submenu offers the same three choices and marks the current one.
+Choosing an app action without a target opens that widget's editor; it is
+saved after the target is entered. **Configure action…** opens the editor
+directly. Existing configurations keep their original double-click behavior.
+
 Usage providers read existing local sign-ins only when enabled. Claude Code and
 Codex use their default CLI/desktop account. Cursor uses its local session.
 Antigravity and Grok use their CLI sign-in. Copilot uses its CLI or GitHub CLI

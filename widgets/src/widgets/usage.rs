@@ -231,24 +231,10 @@ impl Widget for UsageWidget {
         (48.0, 48.0)
     }
     /// Read the usage again now, instead of opening the provider's page.
-    fn double_click(&mut self) -> bool {
+    fn refresh(&mut self) {
         self.refresh
             .store(true, std::sync::atomic::Ordering::SeqCst);
         self.notice = Some("Refreshing…".into());
-        true
-    }
-
-    fn url(&self) -> String {
-        match self.provider {
-            ProviderId::Claude => "https://claude.ai/settings/usage",
-            ProviderId::Codex => "https://chatgpt.com/codex/settings/usage",
-            ProviderId::Antigravity => "https://antigravity.google/",
-            ProviderId::OpenCode => "https://opencode.ai/",
-            ProviderId::Cursor => "https://cursor.com/dashboard",
-            ProviderId::Grok => "https://grok.com/",
-            ProviderId::Copilot => "https://github.com/settings/billing",
-        }
-        .into()
     }
     fn tick(&mut self) {
         while let Ok(result) = self.rx.try_recv() {

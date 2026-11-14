@@ -26,6 +26,8 @@ use windows::{
 pub const TITLE: &str = "BetterTaskbar Dashboard";
 const PAGE_MESSAGE: u32 = WM_APP + 42;
 static REQUESTED: AtomicUsize = AtomicUsize::new(usize::MAX);
+const ACTION_MESSAGE: u32 = PAGE_MESSAGE + 1;
+static REQUESTED_ACTION: AtomicUsize = AtomicUsize::new(usize::MAX);
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Widgets,
@@ -99,6 +101,31 @@ pub fn open(page: Page) {
     }
 }
 
+/// Open the selected widget's editor, optionally preselecting an unsaved mode.
+pub fn open_action(kind: Kind, action: Option<crate::click_action::Action>) {
+    let mode = action
+        .and_then(|a| {
+            crate::click_action::Action::ALL
+                .iter()
+                .position(|v| *v == a)
+        })
+        .map_or(0, |i| i + 1);
+    let code = kind.index() * 4 + mode;
+    if let Some(hwnd) = crate::shell::find_by_title(TITLE) {
+        open(Page::Widgets);
+        unsafe {
+            let _ = PostMessageW(Some(hwnd), ACTION_MESSAGE, WPARAM(code), LPARAM(0));
+        }
+    } else if let Err(e) = std::env::current_exe().and_then(|exe| {
+        std::process::Command::new(exe)
+            .arg("--dashboard=widgets")
+            .arg(format!("--edit-action={code}"))
+            .spawn()
+    }) {
+        crate::log::line("dashboard", &format!("Cannot open action settings: {e}"));
+    }
+}
+
 struct Dashboard {
     cfg: SharedConfig,
     base: Config,
@@ -114,6 +141,7 @@ struct Dashboard {
     hooked: bool,
     close_prompt: bool,
     last_refresh: std::time::Instant,
+    action_focus: Option<Kind>,
 }
 impl Dashboard {
     fn new(ctx: &egui::Context, page: Page) -> Self {
@@ -121,7 +149,7 @@ impl Dashboard {
         let cfg = config::shared();
         let base = cfg.lock().unwrap().clone();
         let studio = Studio::new(Kind::Weather, &base);
-        Self {
+        let mut dashboard = Self {
             cfg,
             base: base.clone(),
             draft: base,
@@ -136,12 +164,33 @@ impl Dashboard {
             hooked: false,
             close_prompt: false,
             last_refresh: std::time::Instant::now(),
+            action_focus: None,
+        };
+        if let Some(code) = std::env::args().find_map(|a| {
+            a.strip_prefix("--edit-action=")
+                .and_then(|s| s.parse().ok())
+        }) {
+            dashboard.focus_action(code);
+        }
+        dashboard
+    }
+    fn focus_action(&mut self, code: usize) {
+        if let Some(&kind) = Kind::ALL.get(code / 4) {
+            self.page = Page::Widgets;
+            if !code.is_multiple_of(4) {
+                kind.state_mut(&mut self.draft).double_click.action =
+                    Some(crate::click_action::Action::ALL[code % 4 - 1]);
+            }
+            self.action_focus = Some(kind);
         }
     }
     fn dirty(&self) -> bool {
         self.base.weather != self.draft.weather
             || self.base.calendar != self.draft.calendar
             || self.base.mail != self.draft.mail
+            || Kind::ALL
+                .into_iter()
+                .any(|k| k.state(&self.base).double_click != k.state(&self.draft).double_click)
             || self.studio.dirty()
     }
     fn save(&mut self, all: bool) -> bool {
@@ -156,9 +205,13 @@ impl Dashboard {
             validate(latest)
         }) {
             Ok(()) => {
-                self.base.weather = draft.weather;
-                self.base.calendar = draft.calendar;
-                self.base.mail = draft.mail;
+                self.base.weather = draft.weather.clone();
+                self.base.calendar = draft.calendar.clone();
+                self.base.mail = draft.mail.clone();
+                for kind in Kind::ALL {
+                    kind.state_mut(&mut self.base).double_click =
+                        kind.state(&draft).double_click.clone();
+                }
                 self.notice = Some((
                     true,
                     "Settings saved. Widgets pick up changes automatically.".into(),
@@ -182,13 +235,90 @@ impl Dashboard {
             ($field:ident) => {
                 if self.draft.$field == self.base.$field {
                     self.draft.$field = fresh.$field.clone();
-                    self.base.$field = fresh.$field;
+                    self.base.$field = fresh.$field.clone();
                 }
             };
         }
         sync!(weather);
         sync!(calendar);
         sync!(mail);
+        for kind in Kind::ALL {
+            kind.state_mut(&mut self.draft).double_click.refresh_from(
+                &mut kind.state_mut(&mut self.base).double_click,
+                &kind.state(&fresh).double_click,
+            );
+        }
+    }
+
+    fn save_action(&mut self, kind: Kind) {
+        let draft = kind.state(&self.draft).double_click.clone();
+        let base = kind.state(&self.base).double_click.clone();
+        let result = config::try_update_checked(&self.cfg, |latest| {
+            draft.merge_into(&base, &mut kind.state_mut(latest).double_click);
+            kind.state(latest)
+                .double_click
+                .resolve(kind, latest)
+                .map(|_| ())
+        });
+        match result {
+            Ok(()) => {
+                let saved = kind.state(&self.cfg.lock().unwrap()).double_click.clone();
+                kind.state_mut(&mut self.base).double_click = saved.clone();
+                kind.state_mut(&mut self.draft).double_click = saved;
+                self.notice = Some((true, format!("{} double-click action saved.", kind.label())));
+            }
+            Err(error) => self.notice = Some((false, error)),
+        }
+    }
+
+    fn discard_page(&mut self) {
+        self.draft = settings_for_save(&self.draft, &self.base, self.page, false);
+        self.notice = None;
+    }
+
+    fn action_settings(&mut self, ui: &mut egui::Ui, kind: Kind) {
+        use crate::click_action::{Action, Target};
+        ui.push_id(("double-click", kind.key()), |ui| {
+            let default_url = kind.default_url(&self.draft);
+            let click = &mut kind.state_mut(&mut self.draft).double_click;
+            let mut action = click.action(kind);
+            ui.horizontal(|ui| {
+                let label = ui.label("On double-click");
+                egui::ComboBox::from_id_salt("mode").selected_text(action.label()).show_ui(ui, |ui| {
+                    for a in Action::ALL { ui.selectable_value(&mut action, a, a.label()); }
+                }).response.labelled_by(label.id);
+            });
+            if action != click.action(kind) { click.action = Some(action); }
+            match action {
+                Action::OpenUrl => {
+                    let label = ui.label("URL");
+                    ui.add(egui::TextEdit::singleline(&mut click.url).hint_text(&default_url).desired_width(ui.available_width())).labelled_by(label.id);
+                    ui.label(egui::RichText::new(format!("Blank uses {default_url}")).color(style::MUTED));
+                }
+                Action::Refresh => { ui.label(egui::RichText::new("Fetches this widget’s data again. Repeated requests wait for the 30-second cooldown.").color(style::MUTED)); }
+                Action::LaunchApp => {
+                    let label = ui.label("Application (.exe)");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut click.app).hint_text("C:\\Program Files\\App\\App.exe").desired_width((ui.available_width() - 100.0).max(120.0))).labelled_by(label.id);
+                        if ui.button("Browse…").clicked() {
+                            if let Some(path) = crate::click_action::choose_app() { click.app = path; }
+                        }
+                    });
+                }
+            }
+            let valid = kind.state(&self.draft).double_click.resolve(kind, &self.draft);
+            if let Err(error) = &valid { ui.colored_label(style::DANGER, error); }
+            else if let Ok(Target::App(path)) = &valid {
+                if !path.is_file() { ui.colored_label(style::MUTED, "This app is not currently at that path."); }
+            }
+            let dirty = kind.state(&self.draft).double_click != kind.state(&self.base).double_click;
+            ui.horizontal(|ui| {
+                if ui.add_enabled(dirty && valid.is_ok(), egui::Button::new("Apply action").fill(style::ACCENT)).clicked() { self.save_action(kind); }
+                if ui.add_enabled(dirty, egui::Button::new("Discard action edits")).clicked() {
+                    kind.state_mut(&mut self.draft).double_click = kind.state(&self.base).double_click.clone();
+                }
+            });
+        });
     }
     fn widgets(&mut self, ui: &mut egui::Ui, usage_only: bool) {
         style::heading(
@@ -333,6 +463,21 @@ impl Dashboard {
                         ui.colored_label(style::MUTED, crate::widgets::usage::status(provider));
                     }
                 }
+                let label = format!(
+                    "Double-click: {}",
+                    kind.state(&current).double_click.action(kind).label()
+                );
+                let focus = self.action_focus == Some(kind);
+                let response = egui::CollapsingHeader::new(label)
+                    .id_salt(("action-editor", kind.key()))
+                    .open(focus.then_some(true))
+                    .show(ui, |ui| self.action_settings(ui, kind));
+                if focus {
+                    response
+                        .header_response
+                        .scroll_to_me(Some(egui::Align::Center));
+                    self.action_focus = None;
+                }
             });
             ui.add_space(8.0);
         }
@@ -343,6 +488,8 @@ impl Dashboard {
             "Weather",
             "Choose a place, keep favorites, or enter coordinates.",
         );
+        style::group(ui, |ui| self.action_settings(ui, Kind::Weather));
+        ui.add_space(12.0);
         style::group(ui, |ui| {
             if let Some(place) = &mut self.draft.weather.place {
                 style::field(ui, "Place", &mut place.name, false);
@@ -432,6 +579,10 @@ impl Dashboard {
                 "Connect a CalDAV server, such as iOxide."
             },
         );
+        style::group(ui, |ui| {
+            self.action_settings(ui, if mail { Kind::Mail } else { Kind::Calendar })
+        });
+        ui.add_space(12.0);
         style::group(ui, |ui| {
             if mail {
                 let c = &mut self.draft.mail;
@@ -538,6 +689,10 @@ impl eframe::App for Dashboard {
         if let Some(page) = Page::ALL.get(request) {
             self.page = *page;
         }
+        let action = REQUESTED_ACTION.swap(usize::MAX, Ordering::Relaxed);
+        if action != usize::MAX {
+            self.focus_action(action);
+        }
         self.refresh();
         if let Some(rx) = &self.test {
             match rx.try_recv() {
@@ -590,7 +745,7 @@ impl eframe::App for Dashboard {
                         Page::About=>{style::heading(ui,"BetterTaskbar","Your taskbar widgets, in one place.");style::group(ui,|ui|{ui.label("Usage providers and dashboard styling are adapted from Claude Code Usage Monitor by Code Zeno Pty Ltd.");ui.hyperlink_to("Claude Code Usage Monitor (MIT)","https://github.com/CodeZeno/Claude-Code-Usage-Monitor");ui.hyperlink_to("BetterTaskbar source and third-party notices","https://github.com/mrk1987/bettertaskbar");ui.label("Weather: MET Norway / Yr. Place search: Open-Meteo / GeoNames.");egui::CollapsingHeader::new("CodeZeno MIT license").show(ui,|ui|{ui.label(include_str!("../vendor/codezeno-usage-core/LICENSE"));ui.label(include_str!("../assets/lobe-icons.LICENSE"));});});},Page::Studio=>{}
                     }
                     if matches!(self.page,Page::Weather|Page::Calendar|Page::Mail){ui.add_space(16.0);ui.horizontal(|ui|{if ui.add(egui::Button::new("Save changes").fill(style::ACCENT)).clicked(){self.save(false);}
-if ui.button("Discard edits").clicked(){match self.page {Page::Weather=>self.draft.weather=self.base.weather.clone(),Page::Calendar=>self.draft.calendar=self.base.calendar.clone(),Page::Mail=>self.draft.mail=self.base.mail.clone(),_=>{}}self.notice=None;}});}
+if ui.button("Discard edits").clicked(){self.discard_page();}});}
                     });
                 });
             });
@@ -643,6 +798,10 @@ fn hook(hwnd: HWND) {
     ) -> LRESULT {
         if msg == PAGE_MESSAGE {
             REQUESTED.store(w.0, Ordering::Relaxed);
+            return LRESULT(0);
+        }
+        if msg == ACTION_MESSAGE {
+            REQUESTED_ACTION.store(w.0, Ordering::Relaxed);
             return LRESULT(0);
         }
         DefSubclassProc(hwnd, msg, w, l)
@@ -713,6 +872,12 @@ fn setup(p: codezeno_usage_core::providers::ProviderId) -> &'static str {
     match p{Claude=>"Sign in with Claude Code or the Claude desktop app.",Codex=>"Sign in with the Codex CLI or desktop app.",Antigravity=>"Sign in with the Antigravity CLI.",OpenCode=>"Use OPENCODE_GO_WORKSPACE_ID and OPENCODE_GO_AUTH_COOKIE, or OpenCode Go’s config.json.",Cursor=>"Sign in with Cursor. Its local session is detected automatically.",Grok=>"Run grok login to sign in with your xAI account.",Copilot=>"Sign in with the Copilot CLI or GitHub CLI (gh auth login)."}
 }
 fn validate(c: &Config) -> Result<(), String> {
+    for kind in Kind::ALL {
+        kind.state(c)
+            .double_click
+            .resolve(kind, c)
+            .map_err(|e| format!("{}: {e}", kind.label()))?;
+    }
     for host in [&c.calendar.host, &c.mail.host] {
         if host.trim().is_empty() || host.contains(['\r', '\n', '/', '\\']) {
             return Err("Enter a server hostname or IP address, without a URL or path.".into());
@@ -774,10 +939,29 @@ fn settings_for_save(base: &Config, draft: &Config, page: Page, all: bool) -> Co
         Page::Mail => selected.mail = draft.mail.clone(),
         _ => {}
     }
+    for kind in Kind::ALL {
+        let include = match page {
+            Page::Widgets => true,
+            Page::Weather => kind == Kind::Weather,
+            Page::Calendar => kind == Kind::Calendar,
+            Page::Mail => kind == Kind::Mail,
+            Page::Usage => matches!(kind, Kind::Usage(_)),
+            _ => false,
+        };
+        if include {
+            kind.state_mut(&mut selected).double_click = kind.state(draft).double_click.clone();
+        }
+    }
     selected
 }
 
 fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
+    for kind in Kind::ALL {
+        kind.state(draft).double_click.merge_into(
+            &kind.state(base).double_click,
+            &mut kind.state_mut(latest).double_click,
+        );
+    }
     macro_rules! fields {($group:ident,$($field:ident),+)=>{$(if draft.$group.$field!=base.$group.$field{latest.$group.$field=draft.$group.$field.clone();})+}}
     fields!(weather, place, favorites, refresh_secs);
     fields!(
@@ -804,6 +988,89 @@ fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn action_editor_fits_the_settings_column_and_can_render_a_fixture() {
+        use crate::{
+            click_action::Action,
+            cpu_render::{self, Canvas, Textures},
+        };
+        let cfg = Config::default();
+        let mut dashboard = Dashboard {
+            cfg: std::sync::Arc::new(std::sync::Mutex::new(cfg.clone())),
+            base: cfg.clone(),
+            draft: cfg.clone(),
+            page: Page::Widgets,
+            search: PlaceSearch::default(),
+            notice: None,
+            test: None,
+            test_configuration: None,
+            studio: Studio::new(Kind::Weather, &cfg),
+            preview_frame: 0,
+            hooked: false,
+            close_prompt: false,
+            last_refresh: std::time::Instant::now(),
+            action_focus: None,
+        };
+        dashboard.draft.calendar_widget.double_click.action = Some(Action::Refresh);
+        dashboard.draft.mail_widget.double_click.action = Some(Action::LaunchApp);
+        dashboard.draft.mail_widget.double_click.app = "C:\\Windows\\System32\\notepad.exe".into();
+        let ctx = egui::Context::default();
+        style::configure(&ctx);
+        let mut textures = Textures::default();
+        for width in [820, 440] {
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width as f32, 900.0),
+                    )),
+                    ..Default::default()
+                };
+                let output = ctx.run_ui(input, |ui| {
+                    egui::Frame::new()
+                        .fill(style::SURFACE)
+                        .inner_margin(20)
+                        .show(ui, |ui| {
+                            style::heading(
+                                ui,
+                                "Double-click actions",
+                                "Choose what each widget does when double-clicked.",
+                            );
+                            for kind in [Kind::Weather, Kind::Calendar, Kind::Mail] {
+                                style::group(ui, |ui| {
+                                    ui.strong(kind.label());
+                                    dashboard.action_settings(ui, kind);
+                                });
+                                ui.add_space(12.0);
+                            }
+                            assert!(
+                                ui.min_rect().right() <= width as f32 + 1.0,
+                                "action editor overflows at width {width}"
+                            );
+                        });
+                });
+                textures.set(&output.textures_delta);
+                let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
+                assert!(!primitives.is_empty());
+                if let Some(dir) = std::env::var_os("BTW_ACTION_SHOT_DIR") {
+                    let mut canvas = Canvas::new(width, 900);
+                    cpu_render::paint(&mut canvas, &primitives, &textures, output.pixels_per_point);
+                    let pixels: Vec<u8> = canvas.pixels.iter().flat_map(|p| *p).collect();
+                    let dir = std::path::PathBuf::from(dir);
+                    std::fs::create_dir_all(&dir).unwrap();
+                    image::save_buffer(
+                        dir.join(format!("actions-{width}.png")),
+                        &pixels,
+                        width as u32,
+                        900,
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+                textures.free(output.textures_delta);
+            }
+        }
+    }
     #[test]
     fn changed_connection_fields_invalidate_old_test_results() {
         let tested = Config::default();
@@ -841,6 +1108,42 @@ mod tests {
         assert_eq!(latest.mail.port, 1993);
         assert_eq!(latest.mail.username, "external edit");
         assert_eq!(latest.weather_widget.x, 200);
+    }
+    #[test]
+    fn action_saves_and_discards_are_scoped_to_the_selected_page() {
+        use crate::click_action::Action;
+        let base = Config::default();
+        let mut draft = base.clone();
+        draft.mail_widget.double_click.action = Some(Action::Refresh);
+        draft.weather_widget.double_click.url = "https://example.com/weather".into();
+        let selected = settings_for_save(&base, &draft, Page::Mail, false);
+        assert_eq!(
+            selected.mail_widget.double_click.action,
+            Some(Action::Refresh)
+        );
+        assert_eq!(
+            selected.weather_widget.double_click,
+            base.weather_widget.double_click
+        );
+        let discarded = settings_for_save(&draft, &base, Page::Mail, false);
+        assert_eq!(
+            discarded.mail_widget.double_click,
+            base.mail_widget.double_click
+        );
+        assert_eq!(
+            discarded.weather_widget.double_click,
+            draft.weather_widget.double_click
+        );
+        let mut latest = base.clone();
+        latest.mail_widget.x = 900;
+        latest.mail_widget.double_click.app = "C:\\Apps\\Mail.exe".into();
+        merge_settings(&mut latest, &base, &selected);
+        assert_eq!(latest.mail_widget.x, 900);
+        assert_eq!(latest.mail_widget.double_click.app, "C:\\Apps\\Mail.exe");
+        assert_eq!(
+            latest.mail_widget.double_click.action,
+            Some(Action::Refresh)
+        );
     }
     #[test]
     fn invalid_coordinates_and_multiline_credentials_are_rejected() {

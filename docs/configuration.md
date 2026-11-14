@@ -57,6 +57,27 @@ You rarely need to edit these; dragging sets them.
 - `x`, `y`: screen position when floating or on the desktop.
 - `visible`: `false` hides the widget. The tray menu toggles it.
 
+## Double-click action
+
+Each widget state (including each entry in `usage_widgets`) accepts:
+
+```json
+{
+  "double_click": {
+    "action": "open_url",
+    "url": "https://example.com/",
+    "app": "C:\\Program Files\\Example\\Example.exe"
+  }
+}
+```
+
+`action` is `open_url`, `refresh`, or `launch_app`. Missing or `null` keeps
+the original behavior: open the default website for weather/calendar/mail,
+or refresh for usage widgets. An empty `url` uses the widget's default
+website. App paths are full `.exe` paths, without quotes or arguments.
+Both targets are retained when changing the action. Theme exports contain
+neither target.
+
 ## Credentials and certificates
 
 - Credentials are stored as **plain text**. Keep the file private; it is not

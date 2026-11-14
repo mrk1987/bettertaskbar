@@ -636,11 +636,11 @@ pub fn set_visible(hwnd: HWND, visible: bool) {
     }
 }
 
-pub fn open_url(url: &str) {
+pub fn try_open_url(url: &str) -> Result<(), String> {
     let op = wide("open");
     let target = wide(url);
     unsafe {
-        let _ = ShellExecuteW(
+        let result = ShellExecuteW(
             None,
             PCWSTR(op.as_ptr()),
             PCWSTR(target.as_ptr()),
@@ -648,7 +648,11 @@ pub fn open_url(url: &str) {
             PCWSTR::null(),
             SHOW_WINDOW_CMD(5),
         );
+        if result.0 as usize <= 32 {
+            return Err("Windows could not open the URL. Check your default browser and the widget's double-click settings.".into());
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]

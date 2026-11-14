@@ -10,6 +10,7 @@ use crate::icons::IconCache;
 use crate::widgets::{Update, Widget};
 
 pub struct CalendarWidget {
+    refresh: crate::widgets::RefreshRequest,
     rx: Receiver<Update<Lines>>,
     lines: Option<Lines>,
     /// Shown on the second line instead of "Next" while the server is failing
@@ -43,8 +44,9 @@ fn fetch(cfg: &CalendarCfg) -> Result<(Lines, String), String> {
 impl CalendarWidget {
     pub fn new(cfg: SharedConfig) -> Self {
         let (tx, rx) = mpsc::channel();
-        crate::widgets::poll("calendar", cfg, tx, pick, fetch);
+        let refresh = crate::widgets::poll("calendar", cfg, tx, pick, fetch);
         Self {
+            refresh,
             rx,
             lines: None,
             notice: Some("Loading…".into()),
@@ -102,8 +104,9 @@ impl Widget for CalendarWidget {
         (230.0, 48.0)
     }
 
-    fn url(&self) -> String {
-        "https://calendar.proton.me".to_owned()
+    fn refresh(&mut self) {
+        self.refresh.request();
+        self.notice = Some("Refresh requested…".into());
     }
 
     fn values(&self) -> crate::theme::Values {

@@ -114,6 +114,7 @@ pub enum Placement {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WidgetState {
+    pub double_click: crate::click_action::Settings,
     pub placement: Placement,
     pub dock_side: Option<DockSide>,
     pub manual_bar_offset: Option<i32>,
@@ -136,6 +137,7 @@ impl Default for WidgetState {
     fn default() -> Self {
         Self {
             placement: Placement::Taskbar,
+            double_click: Default::default(),
             dock_side: None,
             manual_bar_offset: None,
             enabled: true,

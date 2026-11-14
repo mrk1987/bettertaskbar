@@ -32,7 +32,7 @@ pub struct WeatherData {
 }
 
 pub struct WeatherWidget {
-    cfg: SharedConfig,
+    refresh: crate::widgets::RefreshRequest,
     rx: Receiver<WeatherData>,
     latest: Option<WeatherData>,
 }
@@ -41,9 +41,11 @@ impl WeatherWidget {
     pub fn new(cfg: SharedConfig) -> Self {
         let (tx, rx) = mpsc::channel();
         let bg = cfg.clone();
-        std::thread::spawn(move || poll_loop(bg, tx));
+        let refresh = crate::widgets::RefreshRequest::default();
+        let requested = refresh.clone();
+        std::thread::spawn(move || poll_loop(bg, tx, requested));
         Self {
-            cfg,
+            refresh,
             rx,
             latest: None,
         }
@@ -59,7 +61,11 @@ pub fn set_place(cfg: &SharedConfig, place: Place) {
     });
 }
 
-fn poll_loop(cfg: SharedConfig, tx: mpsc::Sender<WeatherData>) {
+fn poll_loop(
+    cfg: SharedConfig,
+    tx: mpsc::Sender<WeatherData>,
+    requested: crate::widgets::RefreshRequest,
+) {
     let mut last: Option<Instant> = None;
     let mut last_place: Option<Place> = None;
     loop {
@@ -67,7 +73,8 @@ fn poll_loop(cfg: SharedConfig, tx: mpsc::Sender<WeatherData>) {
             let c = cfg.lock().unwrap();
             (c.weather.place.clone(), c.weather.refresh_secs)
         };
-        let due = last.is_none_or(|t| t.elapsed() >= Duration::from_secs(refresh));
+        let manual = requested.take_if_due(last.map(|t| t.elapsed()).unwrap_or(Duration::MAX));
+        let due = manual || last.is_none_or(|t| t.elapsed() >= Duration::from_secs(refresh));
         if let Some(place) = place.clone() {
             if due || last_place.as_ref() != Some(&place) {
                 if let Some(data) = fetch(&place) {
@@ -242,15 +249,8 @@ impl Widget for WeatherWidget {
         (76.0, 48.0)
     }
 
-    fn url(&self) -> String {
-        let cfg = self.cfg.lock().unwrap();
-        match &cfg.weather.place {
-            Some(p) => format!(
-                "https://www.yr.no/en/forecast/daily-table/{:.4},{:.4}",
-                p.lat, p.lon
-            ),
-            None => "https://www.yr.no/".to_owned(),
-        }
+    fn refresh(&mut self) {
+        self.refresh.request();
     }
 
     fn values(&self) -> crate::theme::Values {

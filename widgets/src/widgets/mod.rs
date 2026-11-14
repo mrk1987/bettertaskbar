@@ -17,11 +17,7 @@ pub trait Widget {
         crate::theme::Values::default()
     }
     fn size(&self) -> (f32, f32);
-    fn url(&self) -> String;
-    /// A double-click on the pill. Returns false to open `url` instead.
-    fn double_click(&mut self) -> bool {
-        false
-    }
+    fn refresh(&mut self);
     fn ui(&mut self, ui: &mut egui::Ui, icons: &mut IconCache);
 }
 
@@ -31,6 +27,23 @@ pub enum Update<T> {
     Unconfigured,
     Data(T),
     Failed(String),
+}
+
+/// Coalesces repeated requests and keeps manual refreshes at least 30 s
+/// apart from completed readings. Pending requests survive the cooldown.
+#[derive(Clone, Default)]
+pub struct RefreshRequest(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl RefreshRequest {
+    pub fn request(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn clear(&self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub fn take_if_due(&self, elapsed: Duration) -> bool {
+        elapsed >= Duration::from_secs(30)
+            && self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// Background refresh loop for a pill. `pick` takes this widget's settings and
@@ -47,13 +60,17 @@ pub fn poll<C, T>(
     tx: Sender<Update<T>>,
     pick: fn(&Config) -> (C, u64, bool),
     fetch: fn(&C) -> Result<(T, String), String>,
-) where
+) -> RefreshRequest
+where
     C: Clone + PartialEq + Send + 'static,
     T: Send + 'static,
 {
+    let refresh = RefreshRequest::default();
+    let requested = refresh.clone();
     std::thread::spawn(move || {
         let mut last_logged = String::new();
         loop {
+            requested.clear();
             let (settings, refresh, configured) = pick(&cfg.lock().unwrap());
             let (update, summary) = if !configured {
                 (
@@ -76,12 +93,15 @@ pub fn poll<C, T>(
             let started = Instant::now();
             while started.elapsed() < Duration::from_secs(refresh.max(30)) {
                 std::thread::sleep(Duration::from_secs(1));
-                if pick(&cfg.lock().unwrap()).0 != settings {
+                if pick(&cfg.lock().unwrap()).0 != settings
+                    || requested.take_if_due(started.elapsed())
+                {
                     break;
                 }
             }
         }
     });
+    refresh
 }
 
 /// The part of an error worth a pill's second line: the text after the last
@@ -99,6 +119,21 @@ fn short_reason(error: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::short_reason;
+
+    #[test]
+    fn manual_refresh_coalesces_and_survives_the_cooldown() {
+        let request = super::RefreshRequest::default();
+        let worker = request.clone();
+        request.request();
+        request.request();
+        request.request();
+        assert!(!worker.take_if_due(std::time::Duration::from_secs(29)));
+        assert!(worker.take_if_due(std::time::Duration::from_secs(30)));
+        assert!(!worker.take_if_due(std::time::Duration::from_secs(60)));
+        request.request();
+        assert!(!worker.take_if_due(std::time::Duration::ZERO));
+        assert!(worker.take_if_due(std::time::Duration::from_secs(30)));
+    }
 
     #[test]
     fn reasons() {

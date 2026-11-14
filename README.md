@@ -29,6 +29,11 @@ built for Proton through iOxide and Proton Mail Bridge, but any CalDAV or IMAP
 server works. Usage widgets are off by default and reuse the sign-in of each
 tool's own app or CLI.
 
+Double-click actions are configurable per widget: open a URL, refresh its
+data, or launch an app. Set the URL or app in the widget settings, then switch
+between actions from the widget's right-click **Double-click action** menu.
+The table above shows the defaults.
+
 Ideas for more widgets are welcome:
 [open an issue](https://github.com/mrk1987/bettertaskbar/issues/new) and say
 what you would like to see on your taskbar.

@@ -119,6 +119,11 @@ fn upkeep_docks(magnetic: bool, placement: Placement, dragging: bool) -> bool {
 }
 
 static DISABLED_USAGE: WidgetState = WidgetState {
+    double_click: crate::click_action::Settings {
+        action: None,
+        url: String::new(),
+        app: String::new(),
+    },
     placement: Placement::Taskbar,
     dock_side: Some(crate::config::DockSide::Right),
     manual_bar_offset: None,
@@ -165,6 +170,34 @@ impl Kind {
             Self::Mail => "Mail",
             Self::Usage(p) => p.descriptor().display_name,
         }
+    }
+
+    pub fn default_url(self, cfg: &crate::config::Config) -> String {
+        match self {
+            Self::Weather => {
+                return cfg.weather.place.as_ref().map_or_else(
+                    || "https://www.yr.no/".into(),
+                    |p| {
+                        format!(
+                            "https://www.yr.no/en/forecast/daily-table/{:.4},{:.4}",
+                            p.lat, p.lon
+                        )
+                    },
+                )
+            }
+            Self::Calendar => "https://calendar.proton.me",
+            Self::Mail => "https://mail.proton.me",
+            Self::Usage(p) => match p {
+                ProviderId::Claude => "https://claude.ai/settings/usage",
+                ProviderId::Codex => "https://chatgpt.com/codex/settings/usage",
+                ProviderId::Antigravity => "https://antigravity.google/",
+                ProviderId::OpenCode => "https://opencode.ai/",
+                ProviderId::Cursor => "https://cursor.com/dashboard",
+                ProviderId::Grok => "https://grok.com/",
+                ProviderId::Copilot => "https://github.com/settings/billing",
+            },
+        }
+        .into()
     }
 
     pub fn title(self) -> &'static str {
@@ -239,6 +272,7 @@ pub struct WidgetApp {
     in_process: bool,
     /// Cleared when this pill's window is gone, so its upkeep thread stops.
     window_alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    action_error: Option<String>,
 }
 
 impl Drop for WidgetApp {
@@ -298,6 +332,7 @@ impl WidgetApp {
             last_magnetic_mode: None,
             in_process: false,
             window_alive: Default::default(),
+            action_error: None,
         }
     }
 
@@ -653,6 +688,8 @@ impl WidgetApp {
     fn show_menu(&mut self) {
         use crate::popup::Item;
         enum Action {
+            DoubleClick(crate::click_action::Action),
+            EditDoubleClick,
             Place(Placement),
             Hide,
             Weather(crate::config::Place),
@@ -670,6 +707,24 @@ impl WidgetApp {
         .into_iter()
         .map(|(p, label)| Item::Command(label.into(), placement == p, Action::Place(p)))
         .collect();
+        let click = self.state().double_click;
+        let mut choices: Vec<_> = crate::click_action::Action::ALL
+            .into_iter()
+            .map(|action| {
+                Item::Command(
+                    action.label().into(),
+                    click.action(self.kind) == action,
+                    Action::DoubleClick(action),
+                )
+            })
+            .collect();
+        choices.push(Item::Separator);
+        choices.push(Item::Command(
+            "Configure action…".into(),
+            false,
+            Action::EditDoubleClick,
+        ));
+        items.push(Item::Submenu("Double-click action".into(), choices));
         items.push(Item::Command("Settings…".into(), false, Action::Settings));
         items.push(Item::Command("Hide widget".into(), false, Action::Hide));
         if self.kind == Kind::Weather {
@@ -704,6 +759,19 @@ impl WidgetApp {
             Action::Quit,
         ));
         match crate::popup::show(items) {
+            Ok(Some(Action::DoubleClick(action))) => {
+                let mut click = self.state().double_click;
+                click.action = Some(action);
+                let valid = click.resolve(self.kind, &self.cfg.lock().unwrap()).is_ok();
+                if valid {
+                    self.with_state(|s| s.double_click.action = Some(action));
+                } else {
+                    // Pick the mode in the editor, but do not save an unusable
+                    // action over a working one before its target is entered.
+                    crate::dashboard::open_action(self.kind, Some(action));
+                }
+            }
+            Ok(Some(Action::EditDoubleClick)) => crate::dashboard::open_action(self.kind, None),
             Ok(Some(Action::Place(p))) => self.with_state(|s| s.placement = p),
             Ok(Some(Action::Hide)) => self.with_state(|s| s.visible = false),
             Ok(Some(Action::Weather(place))) => {
@@ -998,8 +1066,26 @@ impl WidgetApp {
             self.drag_frame(hwnd, pressed);
         }
 
-        if resp.double_clicked() && !self.widget.double_click() {
-            shell::open_url(&self.widget.url());
+        if let Some(error) = &self.action_error {
+            resp.clone().on_hover_text(error);
+        }
+        if resp.double_clicked() {
+            let target = {
+                let cfg = self.cfg.lock().unwrap();
+                self.kind.state(&cfg).double_click.resolve(self.kind, &cfg)
+            };
+            let result = target.and_then(|target| match target {
+                crate::click_action::Target::Refresh => {
+                    self.widget.refresh();
+                    Ok(())
+                }
+                crate::click_action::Target::Url(url) => shell::try_open_url(&url),
+                crate::click_action::Target::App(path) => crate::click_action::launch(&path),
+            });
+            self.action_error = result.err();
+            if let Some(error) = &self.action_error {
+                crate::log::line(self.kind.key(), error);
+            }
         }
         #[cfg(debug_assertions)]
         {

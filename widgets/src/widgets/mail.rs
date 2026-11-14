@@ -12,6 +12,7 @@ use crate::widgets::calendar::{proton_tile, two_lines};
 use crate::widgets::{Update, Widget};
 
 pub struct MailWidget {
+    refresh: crate::widgets::RefreshRequest,
     cfg: SharedConfig,
     rx: Receiver<Update<Unread>>,
     unread: Option<Unread>,
@@ -36,8 +37,9 @@ fn fetch(cfg: &MailCfg) -> Result<(Unread, String), String> {
 impl MailWidget {
     pub fn new(cfg: SharedConfig) -> Self {
         let (tx, rx) = mpsc::channel();
-        crate::widgets::poll("mail", cfg.clone(), tx, pick, fetch);
+        let refresh = crate::widgets::poll("mail", cfg.clone(), tx, pick, fetch);
         Self {
+            refresh,
             cfg,
             rx,
             unread: None,
@@ -53,8 +55,9 @@ impl Widget for MailWidget {
         (230.0, 48.0)
     }
 
-    fn url(&self) -> String {
-        "https://mail.proton.me".to_owned()
+    fn refresh(&mut self) {
+        self.refresh.request();
+        self.notice = Some("Refresh requested…".into());
     }
 
     fn values(&self) -> crate::theme::Values {

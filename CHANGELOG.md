@@ -5,6 +5,13 @@ Notable changes to BetterTaskbar. Versions follow
 
 ## Unreleased
 
+### Added
+
+- Per-widget double-click actions: open a configurable URL, refresh data,
+  or launch a chosen application. Configure targets in the dashboard and
+  switch actions from the widget's right-click menu. Existing defaults
+  are preserved, and manual refresh is available for every widget.
+
 ### Fixed
 
 - CPU-rendered widgets keep their taskbar parent while dragged along the

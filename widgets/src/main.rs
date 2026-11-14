@@ -2,6 +2,7 @@
 
 mod app;
 mod caldav;
+mod click_action;
 mod config;
 mod cpu_render;
 mod dashboard;
