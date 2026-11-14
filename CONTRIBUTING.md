@@ -28,7 +28,12 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace -- --test-threads=1
 cargo build --release
+cargo about generate about.hbs -o target/THIRD_PARTY_LICENSES.txt
 ```
+
+The license check needs `cargo-about` (`cargo install cargo-about --locked`).
+It checks the release notices, including licenses brought in by dependency
+or feature changes.
 
 If you change how the widgets look or move, include a screenshot of the taskbar.
 Read the notes on capturing it first: the widgets are drawn by a different part

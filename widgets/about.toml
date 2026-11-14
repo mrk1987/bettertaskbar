@@ -7,6 +7,8 @@ accepted = [
     "Zlib",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    # Boost Software License: clipboard-win and error-code (native clipboard).
+    "BSL-1.0",
     "ISC",
     "0BSD",
     "Unlicense",
