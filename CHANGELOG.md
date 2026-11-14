@@ -14,6 +14,9 @@ Notable changes to BetterTaskbar. Versions follow
 
 ### Fixed
 
+- Enabled Windows clipboard access so dashboard text fields support pasting
+  from other applications, as well as copying and cutting.
+
 - CPU-rendered widgets keep their taskbar parent while dragged along the
   bar, and detach when dragged away. Snapped previews no longer rely on a
   floating window that Explorer can cover.
