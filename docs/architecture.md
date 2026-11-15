@@ -31,7 +31,12 @@ triangles into premultiplied pixels with the same math as egui-wgpu, and
 whole pill stays clickable. A layered child window needs Windows 8 or later
 declared in the manifest (`widgets/app.manifest`, embedded by `build.rs`).
 Measured 2026-11-14, release build, five widgets: 20 to 22 MiB private
-working set and 0.5 to 0.7 % of one core for the whole process. Two traps
+working set and 0.5 to 0.7 % of one core for the whole process. Measured
+again 2026-11-15 (1.1.1, `tools/sample.ps1`, 40 s after a minute's warm-up)
+with all eight widgets of the README banner: 30.9 MiB private working set,
+33.8 MiB committed, 1.44 % of one core. Not separated out, but the likely
+main cost is scrolling text: a pill redraws every 40 ms while its text moves.
+Two traps
 found on the way:
 
 - A docked pill's thread shares an input queue with Explorer, so waiting with

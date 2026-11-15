@@ -3,7 +3,7 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.1.1 - 2026-11-15
 
 ### Changed
 
@@ -13,6 +13,13 @@ Notable changes to BetterTaskbar. Versions follow
 - The Next Departure direction filter takes several destinations, comma
   separated, for lines that end at different stops in one direction. The
   dashboard explains what to enter.
+- README rewritten for everything 1.1 added, with fresh resource figures
+  for all eight widgets.
+
+### Fixed
+
+- Commas can be typed in the Next Departure **Lines** box; they used to
+  vanish before the next line number could follow.
 
 ## 1.1.0 - 2026-11-15
 
