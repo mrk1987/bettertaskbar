@@ -9,6 +9,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::i18n::tr;
 use eframe::egui;
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 
@@ -179,12 +180,12 @@ impl Kind {
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::Weather => "Weather",
-            Self::Calendar => "Calendar",
-            Self::Mail => "Mail",
-            Self::NowPlaying => "Now Playing",
-            Self::Departures => "Next Departure",
-            Self::News => "News",
+            Self::Weather => tr("Weather"),
+            Self::Calendar => tr("Calendar"),
+            Self::Mail => tr("Mail"),
+            Self::NowPlaying => tr("Now Playing"),
+            Self::Departures => tr("Next Departure"),
+            Self::News => tr("News"),
             Self::Usage(p) => p.descriptor().display_name,
         }
     }
@@ -294,6 +295,8 @@ struct Drag {
 
 pub struct WidgetApp {
     kind: Kind,
+    /// The language last drawn in; `None` before the first frame.
+    norwegian: Option<bool>,
     cfg: SharedConfig,
     widget: Box<dyn Widget>,
     icons: IconCache,
@@ -385,6 +388,7 @@ impl WidgetApp {
             #[cfg(debug_assertions)]
             preview_frame: 0,
             custom_fonts: false,
+            norwegian: None,
             hwnd: None,
             applied_placement: None,
             applied_round: None,
@@ -773,9 +777,9 @@ impl WidgetApp {
         crate::config::refresh(&self.cfg);
         let placement = self.state().placement;
         let mut items: Vec<_> = [
-            (Placement::Taskbar, "Dock on taskbar"),
-            (Placement::Desktop, "Pin to desktop"),
-            (Placement::Floating, "Float on top"),
+            (Placement::Taskbar, tr("Dock on taskbar")),
+            (Placement::Desktop, tr("Pin to desktop")),
+            (Placement::Floating, tr("Float on top")),
         ]
         .into_iter()
         .map(|(p, label)| Item::Command(label.into(), placement == p, Action::Place(p)))
@@ -793,13 +797,17 @@ impl WidgetApp {
             .collect();
         choices.push(Item::Separator);
         choices.push(Item::Command(
-            "Configure action…".into(),
+            tr("Configure action…").into(),
             false,
             Action::EditDoubleClick,
         ));
-        items.push(Item::Submenu("Double-click action".into(), choices));
-        items.push(Item::Command("Settings…".into(), false, Action::Settings));
-        items.push(Item::Command("Hide widget".into(), false, Action::Hide));
+        items.push(Item::Submenu(tr("Double-click action").into(), choices));
+        items.push(Item::Command(
+            tr("Settings…").into(),
+            false,
+            Action::Settings,
+        ));
+        items.push(Item::Command(tr("Hide widget").into(), false, Action::Hide));
         if self.kind == Kind::Weather {
             let weather = self.cfg.lock().unwrap().weather.clone();
             items.push(Item::Separator);
@@ -821,9 +829,13 @@ impl WidgetApp {
                 }
             }
             if !places.is_empty() {
-                items.push(Item::Submenu("Place".into(), places));
+                items.push(Item::Submenu(tr("Place").into(), places));
             }
-            items.push(Item::Command("Search place…".into(), false, Action::Search));
+            items.push(Item::Command(
+                tr("Search place…").into(),
+                false,
+                Action::Search,
+            ));
         }
         if self.kind == Kind::Departures {
             let departures = self.cfg.lock().unwrap().departures.clone();
@@ -846,12 +858,12 @@ impl WidgetApp {
             }
             if !stops.is_empty() {
                 items.push(Item::Separator);
-                items.push(Item::Submenu("Stop".into(), stops));
+                items.push(Item::Submenu(tr("Stop").into(), stops));
             }
         }
         items.push(Item::Separator);
         items.push(Item::Command(
-            "Quit all widgets".into(),
+            tr("Quit all widgets").into(),
             false,
             Action::Quit,
         ));
@@ -1019,6 +1031,14 @@ impl WidgetApp {
         self.widget.tick();
         let ppp = ctx.pixels_per_point();
         let state = self.state();
+        crate::i18n::apply(self.cfg.lock().unwrap().language);
+        // Text a widget built earlier (calendar lines, notices) is in the old
+        // language: read again so it is rebuilt in the new one.
+        let norwegian = crate::i18n::norwegian();
+        if self.norwegian.is_some_and(|before| before != norwegian) {
+            self.widget.refresh();
+        }
+        self.norwegian = Some(norwegian);
         let themed = state.theme.as_ref().is_some_and(|t| t.validate().is_ok())
             || matches!(self.kind, Kind::Usage(_));
         if themed != self.custom_fonts {

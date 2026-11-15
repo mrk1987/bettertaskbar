@@ -280,6 +280,8 @@ impl Default for WidgetState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Interface language; `System` follows Windows.
+    pub language: crate::i18n::Language,
     pub magnetized: bool,
     /// Run each pill as its own GPU-drawn eframe process, as before 1.0.1,
     /// instead of drawing every pill in the hub's process on the CPU
@@ -308,6 +310,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            language: Default::default(),
             magnetized: true,
             process_per_widget: false,
             usage_refresh_minutes: USAGE_REFRESH_CHOICES[0],

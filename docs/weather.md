@@ -7,8 +7,9 @@ below blue.
 The second line says when rain, sleet or snow starts within six hours:
 `Rain 40m`, `Snow 3h`, or `Rain now` while it is falling. With nothing due it
 says `Dry 6h`. An hour counts as wet from 0.1 mm. The timing comes from the
-hourly forecast, so it is accurate to within the hour. The day's total stays
-available to themes as `precip`.
+hourly forecast, so it is accurate to within the hour. Themes get the same
+line as `{secondary}` (and `{rain_hint}`); the day's total stays available as
+`{precip}`.
 
 ## Configure
 

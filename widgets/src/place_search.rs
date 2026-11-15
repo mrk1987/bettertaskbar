@@ -1,5 +1,6 @@
 //! A separate root window: eframe child viewports do not present on our GPU.
 use crate::config::Place;
+use crate::i18n::tr;
 use eframe::egui;
 use std::sync::mpsc::{self, Receiver};
 
@@ -21,9 +22,9 @@ impl PlaceSearch {
                     match result {
                         Ok(results) => {
                             self.status = if results.is_empty() {
-                                "No places found. Try another name.".into()
+                                tr("No places found. Try another name.").into()
                             } else {
-                                "Choose a place:".into()
+                                tr("Choose a place:").into()
                             };
                             self.results = results;
                         }
@@ -32,14 +33,14 @@ impl PlaceSearch {
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.pending = None;
-                    self.status = "Search stopped. Try again.".into();
+                    self.status = tr("Search stopped. Try again.").into();
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        ui.label("Place name");
+        ui.label(tr("Place name"));
         ui.hyperlink_to(
-            "Place search by Open-Meteo / GeoNames",
+            tr("Place search by Open-Meteo / GeoNames"),
             "https://open-meteo.com/en/docs/geocoding-api",
         );
         let input = ui.text_edit_singleline(&mut self.query);
@@ -50,7 +51,7 @@ impl PlaceSearch {
         let enabled = self.pending.is_none() && !self.query.trim().is_empty();
         let enter = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if (ui
-            .add_enabled(enabled, egui::Button::new("Search"))
+            .add_enabled(enabled, egui::Button::new(tr("Search")))
             .clicked()
             || enter)
             && enabled
@@ -60,7 +61,7 @@ impl PlaceSearch {
             let ctx = ui.ctx().clone();
             self.pending = Some(rx);
             self.results.clear();
-            self.status = "Searching…".into();
+            self.status = tr("Searching…").into();
             std::thread::spawn(move || {
                 let _ = tx.send(crate::widgets::weather::search_places(&query));
                 ctx.request_repaint();
@@ -105,9 +106,9 @@ impl StopSearch {
                     match result {
                         Ok(results) => {
                             self.status = if results.is_empty() {
-                                "No stops found. Try another name.".into()
+                                tr("No stops found. Try another name.").into()
                             } else {
-                                "Choose a stop:".into()
+                                tr("Choose a stop:").into()
                             };
                             self.results = results;
                         }
@@ -116,12 +117,12 @@ impl StopSearch {
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.pending = None;
-                    self.status = "Search stopped. Try again.".into();
+                    self.status = tr("Search stopped. Try again.").into();
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        ui.label("Find a stop");
+        ui.label(tr("Find a stop"));
         let input = ui.add(
             egui::TextEdit::singleline(&mut self.query)
                 .hint_text("Jernbanetorget, Bergen busstasjon…"),
@@ -129,7 +130,7 @@ impl StopSearch {
         let enabled = self.pending.is_none() && !self.query.trim().is_empty();
         let enter = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if (ui
-            .add_enabled(enabled, egui::Button::new("Search stops"))
+            .add_enabled(enabled, egui::Button::new(tr("Search stops")))
             .clicked()
             || enter)
             && enabled
@@ -139,7 +140,7 @@ impl StopSearch {
             let ctx = ui.ctx().clone();
             self.pending = Some(rx);
             self.results.clear();
-            self.status = "Searching…".into();
+            self.status = tr("Searching…").into();
             std::thread::spawn(move || {
                 let _ = tx.send(crate::widgets::departures::search_stops(&query));
                 ctx.request_repaint();
@@ -162,7 +163,7 @@ impl StopSearch {
             self.status.clear();
         }
         ui.hyperlink_to(
-            "Stops and departures by Entur",
+            tr("Stops and departures by Entur"),
             "https://developer.entur.org/",
         );
         selected

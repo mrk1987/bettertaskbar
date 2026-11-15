@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod builtin_icons;
 mod caldav;
 mod click_action;
 mod config;
@@ -8,6 +9,8 @@ mod cpu_render;
 mod dashboard;
 mod dashboard_style;
 mod http;
+mod i18n;
+mod i18n_nb;
 mod ical;
 mod icons;
 mod imap;

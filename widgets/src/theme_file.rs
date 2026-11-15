@@ -1,3 +1,4 @@
+use crate::i18n::tr;
 use crate::theme::Theme;
 use std::{
     io::Read,
@@ -9,7 +10,7 @@ use windows::{
 };
 pub fn choose(save: bool) -> Option<PathBuf> {
     let mut buffer = [0u16; 4096];
-    let filter: Vec<u16> = "Widget themes (*.json)\0*.json\0\0"
+    let filter: Vec<u16> = format!("{}\0*.json\0\0", tr("Widget themes (*.json)"))
         .encode_utf16()
         .collect();
     let mut dialog = OPENFILENAMEW {
@@ -52,7 +53,7 @@ pub fn read(path: &Path) -> Result<Theme, String> {
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
     if bytes.len() > 256 * 1024 {
-        return Err("Theme files must be smaller than 256 KB.".into());
+        return Err(tr("Theme files must be smaller than 256 KB.").into());
     }
     let theme: Theme =
         serde_json::from_slice(&bytes).map_err(|e| format!("Cannot read theme: {e}"))?;

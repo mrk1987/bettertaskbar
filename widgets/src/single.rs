@@ -679,8 +679,15 @@ mod tests {
             return;
         };
         let dir = std::path::PathBuf::from(dir);
-        let cfg: crate::config::SharedConfig =
-            std::sync::Arc::new(std::sync::Mutex::new(crate::config::Config::default()));
+        // BTW_BANNER_LANGUAGE=norwegian draws the pills in Norwegian.
+        let mut config = crate::config::Config::default();
+        if std::env::var("BTW_BANNER_LANGUAGE").as_deref() == Ok("norwegian") {
+            config.language = crate::i18n::Language::Norwegian;
+        } else {
+            config.language = crate::i18n::Language::English;
+        }
+        crate::i18n::apply(config.language);
+        let cfg: crate::config::SharedConfig = std::sync::Arc::new(std::sync::Mutex::new(config));
         let icon_url = WeatherWidget::sample_icon_url();
         let icon = crate::http::agent()
             .get(&icon_url)

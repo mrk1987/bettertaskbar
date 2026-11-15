@@ -3,6 +3,21 @@
 Open the dashboard by clicking the tray icon or choosing **Settings…** on any
 widget. Closing it leaves the widgets running. Unsaved edits prompt before closing.
 
+## General
+
+The first page holds the settings that apply to every widget:
+
+- **Language:** English, Norsk bokmål, or **Same as Windows** (the default),
+  which shows Norwegian when Windows' display language is Norwegian. It covers
+  the dashboard, the tray menu, the widgets' right-click menus and the text on
+  the widgets, and applies at once. Widgets read their data again so text they
+  already built (calendar lines, notices) changes too. Calendar dates use
+  Norwegian day and month names (`ma. 14:30`, `3. des. 09:05`). Error details
+  from servers and the `--check` output stay in English.
+- **Magnetic taskbar placement:** see [Magnetic taskbar placement](#magnetic-taskbar-placement).
+- **Pin all to taskbar / desktop, Float all on top:** the same as in the tray
+  menu. The one that every enabled widget already uses is selected.
+
 ## Settings
 
 Widget toggles apply immediately. Settings forms use **Save changes**; that saves
@@ -65,11 +80,18 @@ The original appearance remains active until you apply a custom layout.
   Imported geometry and file size are bounded and validated before rendering.
 
 Text supports literal data bindings such as `{primary}`, `{secondary}` and
-`{title}`. Weather also supplies `{high}`, `{low}`, `{precip}`; mail supplies
+`{title}`. Weather also supplies `{high}`, `{low}`, `{precip}`, `{rain_hint}`; mail supplies
 `{count}`; usage widgets supply `{usage}`, `{weekly}` and `{reset}`. Progress
 layers take a numeric binding name such as `usage`, with values from 0 to 100.
 The inspector lists the sample values for the selected widget. Missing values
 show a dash. Bindings never execute expressions or scripts.
+
+Icon layers bound to `icon` show the widget's own icon, the same one the
+default pill draws, scaled to the layer: the Yr symbol, the Proton calendar
+or envelope, the news page, the note (with a pause badge when the player is
+paused), the bus, tram, metro, train or boat, or the provider's logo. It
+follows what the widget shows. Icons are built in or come from yr.no; a theme
+cannot point an icon layer at a file or another web address.
 
 The preview uses sample data. Live widgets use the same rendering code and their
 current data. Themes use logical pixels and follow Windows display scaling.
@@ -92,7 +114,7 @@ controls. Drag a widget to the other side to change its anchor. If a gap fills,
 packing uses the next available gap. A widget with no room is temporarily hidden;
 the dashboard explains this and it returns when space becomes available.
 
-Check **Unmagnetise taskbar widgets** on the Widgets page to keep manual taskbar
+Clear **Magnetic taskbar placement** on the General page to keep manual taskbar
 positions. The setting applies immediately. Floating and desktop widgets do not
 follow the magnetic rule. The placement dropdown on each card can move a widget
 between Taskbar, Desktop and Floating.

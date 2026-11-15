@@ -1,4 +1,5 @@
 //! Per-widget double-click choices. Resolving a choice has no side effects.
+use crate::i18n::{tr, trf};
 use crate::{app::Kind, config::Config};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -21,10 +22,10 @@ impl Action {
     ];
     pub fn label(self) -> &'static str {
         match self {
-            Self::OpenUrl => "Open URL",
-            Self::Refresh => "Refresh widget",
-            Self::LaunchApp => "Launch app",
-            Self::OpenItem => "Open current item",
+            Self::OpenUrl => tr("Open URL"),
+            Self::Refresh => tr("Refresh widget"),
+            Self::LaunchApp => tr("Launch app"),
+            Self::OpenItem => tr("Open current item"),
         }
     }
     /// What `kind` offers. Only pills with a changing item can open it.
@@ -37,8 +38,8 @@ impl Action {
     /// Label for `kind`, naming the item where that is clearer.
     pub fn label_for(self, kind: Kind) -> &'static str {
         match (self, kind) {
-            (Self::OpenItem, Kind::News) => "Open displayed headline",
-            (Self::OpenItem, Kind::NowPlaying) => "Open media player",
+            (Self::OpenItem, Kind::News) => tr("Open displayed headline"),
+            (Self::OpenItem, Kind::NowPlaying) => tr("Open media player"),
             _ => self.label(),
         }
     }
@@ -75,7 +76,7 @@ impl Settings {
         match self.action(kind) {
             Action::Refresh => Ok(Target::Refresh),
             Action::OpenItem if kind.has_current_item() => Ok(Target::CurrentItem),
-            Action::OpenItem => Err("This widget has no current item to open.".into()),
+            Action::OpenItem => Err(tr("This widget has no current item to open.").into()),
             Action::OpenUrl => {
                 let text = if self.url.trim().is_empty() {
                     kind.default_url(cfg)
@@ -87,7 +88,7 @@ impl Settings {
             Action::LaunchApp => {
                 let text = self.app.trim();
                 if text.is_empty() || text.chars().any(char::is_control) {
-                    return Err("Choose an application (.exe) to launch.".into());
+                    return Err(tr("Choose an application (.exe) to launch.").into());
                 }
                 let path = PathBuf::from(text);
                 if !path.is_absolute()
@@ -95,10 +96,10 @@ impl Settings {
                         .extension()
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
                 {
-                    return Err(
-                        "Choose a full path to an application (.exe), without quotes or arguments."
-                            .into(),
-                    );
+                    return Err(tr(
+                        "Choose a full path to an application (.exe), without quotes or arguments.",
+                    )
+                    .into());
                 }
                 Ok(Target::App(path))
             }
@@ -138,20 +139,22 @@ impl Settings {
 pub fn web_url(text: &str) -> Result<String, String> {
     let text = text.trim();
     if text.chars().any(char::is_control) {
-        return Err("Enter a web URL without line breaks or control characters.".into());
+        return Err(tr("Enter a web URL without line breaks or control characters.").into());
     }
-    let parsed = url::Url::parse(text).map_err(|_| "Enter a complete http:// or https:// URL.")?;
+    let parsed =
+        url::Url::parse(text).map_err(|_| tr("Enter a complete http:// or https:// URL."))?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        return Err("Enter a complete http:// or https:// URL.".into());
+        return Err(tr("Enter a complete http:// or https:// URL.").into());
     }
     Ok(parsed.into())
 }
 
 pub fn launch(path: &std::path::Path) -> Result<(), String> {
     if !path.is_file() {
-        return Err(
-            "The selected app was not found. Choose its current .exe file in settings.".into(),
-        );
+        return Err(tr(
+            "The selected app was not found. Choose its current .exe file in settings.",
+        )
+        .into());
     }
     let mut command = std::process::Command::new(path);
     if let Some(parent) = path.parent() {
@@ -161,7 +164,7 @@ pub fn launch(path: &std::path::Path) -> Result<(), String> {
     command
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("Cannot launch the selected app: {e}"))
+        .map_err(|e| trf("Cannot launch the selected app: {error}", &[("error", &e)]))
 }
 
 pub fn choose_app() -> Option<String> {
@@ -170,7 +173,9 @@ pub fn choose_app() -> Option<String> {
         Win32::UI::Controls::Dialogs::*,
     };
     let mut buffer = [0u16; 4096];
-    let filter: Vec<u16> = "Applications (*.exe)\0*.exe\0\0".encode_utf16().collect();
+    let filter: Vec<u16> = format!("{}\0*.exe\0\0", tr("Applications (*.exe)"))
+        .encode_utf16()
+        .collect();
     let mut dialog = OPENFILENAMEW {
         lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
         hwndOwner: crate::shell::find_by_title(crate::dashboard::TITLE).unwrap_or_default(),

@@ -72,9 +72,9 @@ Requires Windows 10 or 11. The dashboard window uses DirectX 12.
   it floats.
 - **Order:** docked widgets keep the order you drop them in. On each side of
   the bar they pack together toward the edge ("magnetic"), and they move
-  along when tray icons come and go or the resolution changes. Tick
-  **Unmagnetise taskbar widgets** in the dashboard to keep every widget at
-  its exact spot instead.
+  along when tray icons come and go or the resolution changes. Clear
+  **Magnetic taskbar placement** under **General** in the dashboard to keep
+  every widget at its exact spot instead.
 - **Right-click a widget** to place, hide or set it up, or to change its
   double-click action. Weather also lists your saved places, Next Departure
   your saved stops.
@@ -86,6 +86,9 @@ Requires Windows 10 or 11. The dashboard window uses DirectX 12.
 
 Click the tray icon, or run `bettertaskbar-widgets.exe --dashboard`.
 
+- **General:** the language (English or Norwegian bokmål; by default it
+  follows Windows), magnetic placement, and putting every widget on the
+  taskbar, on the desktop or floating at once.
 - **Widgets:** switch each widget on or off, choose where it sits, and edit
   its theme.
 - **Weather:** search for places, keep favorites, or enter coordinates.

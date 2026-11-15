@@ -3,6 +3,39 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## 1.1.2 - 2026-11-15
+
+### Added
+
+- Norwegian (bokmål). The dashboard, the tray menu, the widgets' right-click
+  menus and the text on the widgets (`Regn 40m`, `Tørt 6t`, `Trafikk: Lav`,
+  `Ingen ulest e-post`, `Økt` / `Uke`) are in English or Norwegian. By default
+  the language follows Windows; choose it under **General → Language**.
+  Calendar dates use Norwegian day and month names (`ma. 14:30`). Server
+  error details and `--check` output stay in English.
+- A **General** page at the top of the dashboard: language, magnetic
+  placement, and pinning or floating every widget at once, as in the tray
+  menu.
+
+### Changed
+
+- **Unmagnetise taskbar widgets** is now **Magnetic taskbar placement** on
+  the General page: the same setting, as a checkbox that is on when packing
+  is on.
+
+### Fixed
+
+- A themed Weather pill's `{secondary}` line is the rain hint (`Rain 40m`,
+  `Dry 6h`), as on the default pill, instead of the day's precipitation
+  total. The total is still `{precip}`.
+- Theme Studio themes show each widget's own icon. Calendar, Mail, News, Now
+  Playing and Next Departure used to get a square with a letter, because
+  their icons are drawn in code and were never offered to themes. An icon
+  layer bound to `icon` now draws the same icon as the default pill, at the
+  layer's size, and follows the widget (paused player, bus or tram).
+- The Theme Studio preview shows the real icons too, including the Yr symbol
+  for Weather, and its sample text matches the current pills.
+
 ## 1.1.1 - 2026-11-15
 
 ### Changed

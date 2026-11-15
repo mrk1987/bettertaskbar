@@ -16,14 +16,10 @@ transport-mode icons) and News. See `docs/now-playing.md`,
 
 ## Planned
 
-- [ ] **Norwegian translation (bokmål):** the app is now aimed mostly at
-  Norwegians (Yr, Entur, Statens vegvesen, NRK and other Norwegian feeds), so
-  offer Norwegian alongside English. Covers the widget text (`Rain 40m`,
-  `Dry 6h`, `Traffic: Low`, `No unread mail`, countdowns and ages), the
-  right-click and tray menus, and the dashboard. Follow Windows' display
-  language by default, with a choice in the dashboard. Keep the compact
-  pills' widths: measure them from the longest text in the chosen language,
-  not from the English strings. The README and docs can stay in English.
+- [ ] **Norwegian error details:** server and network errors (IMAP,
+  CalDAV, feeds, Entur, Vegvesen) and the `--check` output are still English
+  in Norwegian mode. The usage providers' own window labels (`5h`, `7d`,
+  `30d`) are shown as the providers send them.
 
 ## Suggestions awaiting selection
 

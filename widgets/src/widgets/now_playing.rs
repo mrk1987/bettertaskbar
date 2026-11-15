@@ -2,6 +2,7 @@
 //! session Windows shows in its own media flyout (Spotify, browsers, the
 //! Media Player app and anything else that reports to the system).
 
+use crate::i18n::{tr, trf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
@@ -43,9 +44,9 @@ pub enum PlayState {
 impl PlayState {
     fn label(self) -> &'static str {
         match self {
-            Self::Playing => "Playing",
-            Self::Paused => "Paused",
-            Self::Stopped => "Stopped",
+            Self::Playing => tr("Playing"),
+            Self::Paused => tr("Paused"),
+            Self::Stopped => tr("Stopped"),
         }
     }
 }
@@ -349,40 +350,10 @@ fn safe_app_id(id: &str) -> Option<&str> {
     .then_some(id)
 }
 
-fn music_tile(ui: &mut egui::Ui, state: Option<PlayState>) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 6.0, egui::Color32::from_rgb(0xD9, 0x4F, 0x70));
-    let c = rect.center();
-    let white = egui::Color32::WHITE;
-    // An eighth note: head, stem and flag.
-    let head = c + egui::vec2(-2.5, 4.0);
-    p.circle_filled(head, 3.2, white);
-    let top = egui::pos2(head.x + 2.8, c.y - 7.0);
-    p.line_segment(
-        [egui::pos2(top.x, head.y), top],
-        egui::Stroke::new(1.6, white),
-    );
-    p.line_segment(
-        [top, top + egui::vec2(4.5, 3.5)],
-        egui::Stroke::new(1.8, white),
-    );
-    // A paused or stopped player gets a small badge in the corner.
-    if matches!(state, Some(PlayState::Paused | PlayState::Stopped)) {
-        let badge = egui::Rect::from_center_size(
-            rect.right_bottom() - egui::vec2(4.5, 4.5),
-            egui::vec2(9.0, 9.0),
-        );
-        p.rect_filled(badge, 2.0, egui::Color32::from_rgb(0x20, 0x24, 0x2c));
-        for dx in [-1.6, 1.6] {
-            p.line_segment(
-                [
-                    badge.center() + egui::vec2(dx, -2.5),
-                    badge.center() + egui::vec2(dx, 2.5),
-                ],
-                egui::Stroke::new(1.4, white),
-            );
-        }
+/// The note icon, with a pause badge unless something is playing.
+fn music_icon(state: Option<PlayState>) -> crate::builtin_icons::Icon {
+    crate::builtin_icons::Icon::Music {
+        paused: matches!(state, Some(PlayState::Paused | PlayState::Stopped)),
     }
 }
 
@@ -405,9 +376,15 @@ impl Widget for NowPlayingWidget {
     fn values(&self) -> crate::theme::Values {
         let (primary, secondary, state) = match &self.track {
             Some(t) => (t.title.clone(), detail(t), t.state.label()),
-            None => ("Nothing playing".into(), "No media".into(), ""),
+            None => (tr("Nothing playing").into(), tr("No media").into(), ""),
         };
         [
+            (
+                "icon".into(),
+                music_icon(self.track.as_ref().map(|t| t.state))
+                    .key()
+                    .into(),
+            ),
             ("primary".into(), primary),
             ("secondary".into(), secondary),
             ("state".into(), state.into()),
@@ -424,14 +401,14 @@ impl Widget for NowPlayingWidget {
     }
 
     fn open_current(&mut self) -> Result<(), String> {
-        let track = self.track.as_ref().ok_or("Nothing is playing.")?;
-        let id = safe_app_id(&track.app).ok_or("The player did not say which app it is.")?;
+        let track = self.track.as_ref().ok_or(tr("Nothing is playing."))?;
+        let id = safe_app_id(&track.app).ok_or(tr("The player did not say which app it is."))?;
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
         std::process::Command::new(std::path::Path::new(&windir).join("explorer.exe"))
             .arg(format!("shell:AppsFolder\\{id}"))
             .spawn()
             .map(|_| ())
-            .map_err(|e| format!("Cannot open the player: {e}"))
+            .map_err(|e| trf("Cannot open the player: {error}", &[("error", &e)]))
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _icons: &mut IconCache) {
@@ -443,11 +420,11 @@ impl Widget for NowPlayingWidget {
         }
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
-            music_tile(ui, self.track.as_ref().map(|t| t.state));
+            crate::builtin_icons::tile(ui, music_icon(self.track.as_ref().map(|t| t.state)));
             let (first, second) = match (&self.track, self.loaded) {
                 (Some(t), _) => (t.title.clone(), detail(t)),
-                (None, true) => ("Nothing playing".into(), "No media".into()),
-                (None, false) => ("Now Playing".into(), "Loading…".into()),
+                (None, true) => (tr("Nothing playing").into(), tr("No media").into()),
+                (None, false) => (tr("Now Playing").into(), tr("Loading…").into()),
             };
             self.buttons.clear();
             // The same text width as the Mail and Calendar pills; longer

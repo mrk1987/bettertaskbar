@@ -2,6 +2,7 @@
 //! them, pin a pill onto the desktop (behind app windows), float it always on
 //! top, and style its frame.
 
+use crate::i18n::tr;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -674,7 +675,7 @@ pub fn try_open_url(url: &str) -> Result<(), String> {
             SHOW_WINDOW_CMD(5),
         );
         if result.0 as usize <= 32 {
-            return Err("Windows could not open the URL. Check your default browser and the widget's double-click settings.".into());
+            return Err(tr("Windows could not open the URL. Check your default browser and the widget's double-click settings.").into());
         }
     }
     Ok(())

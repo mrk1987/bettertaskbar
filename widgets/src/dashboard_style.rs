@@ -1,5 +1,6 @@
 //! Dashboard palette and controls adapted from CodeZeno's MIT-licensed UI.
 //! See vendor/codezeno-usage-core/LICENSE and THIRD_PARTY_NOTICES.md.
+use crate::i18n::tr;
 use eframe::egui::{self, Color32};
 pub const SURFACE: Color32 = Color32::from_rgb(32, 32, 32);
 pub const SECTION: Color32 = Color32::from_rgb(35, 35, 35);
@@ -128,7 +129,7 @@ pub fn toggle(ui: &mut egui::Ui, value: &mut bool) -> egui::Response {
         response.mark_changed();
     }
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *value, "Enabled")
+        egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *value, tr("Enabled"))
     });
     let pill = egui::Rect::from_center_size(
         egui::pos2(rect.right() - 22.0, rect.center().y),
@@ -158,7 +159,11 @@ pub fn toggle(ui: &mut egui::Ui, value: &mut bool) -> egui::Response {
     ui.painter().text(
         rect.left_center(),
         egui::Align2::LEFT_CENTER,
-        if *value { "Enabled" } else { "Disabled" },
+        if *value {
+            tr("Enabled")
+        } else {
+            tr("Disabled")
+        },
         egui::FontId::proportional(14.0),
         Color32::from_gray(218),
     );

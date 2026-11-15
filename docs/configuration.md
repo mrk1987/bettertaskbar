@@ -13,6 +13,8 @@ their last settings and leave the file alone.
 
 ```jsonc
 {
+  "language": "system",        // "system" (follow Windows) | "english" | "norwegian"
+  "magnetized": true,          // pack docked widgets toward the bar's edges
   "weather": {
     "place": { "name": "Oslo", "lat": 59.9139, "lon": 10.7522 },
     "favorites": [],

@@ -1,5 +1,6 @@
 //! IMAP unread rotator pill: Proton Mail icon + rotating unread subject.
 
+use crate::i18n::{tr, trf};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -8,7 +9,7 @@ use eframe::egui;
 use crate::config::{Config, MailCfg, SharedConfig};
 use crate::icons::IconCache;
 use crate::imap::Unread;
-use crate::widgets::calendar::{compact_width, proton_tile, two_lines_fixed};
+use crate::widgets::calendar::{compact_width, two_lines_fixed};
 use crate::widgets::{Update, Widget};
 
 pub struct MailWidget {
@@ -45,7 +46,7 @@ impl MailWidget {
             cfg,
             rx,
             unread: None,
-            notice: Some("Loading…".into()),
+            notice: Some(tr("Loading…").into()),
             index: 0,
             last_rotate: Instant::now(),
             shown: true,
@@ -61,7 +62,7 @@ impl Widget for MailWidget {
 
     fn refresh(&mut self) {
         self.refresh.request();
-        self.notice = Some("Refresh requested…".into());
+        self.notice = Some(tr("Refresh requested…").into());
     }
 
     fn values(&self) -> crate::theme::Values {
@@ -71,14 +72,15 @@ impl Widget for MailWidget {
             .as_ref()
             .and_then(|u| u.subjects.get(self.index))
             .cloned()
-            .unwrap_or_else(|| "No unread mail".into());
+            .unwrap_or_else(|| tr("No unread mail").into());
         [
+            ("icon".into(), crate::builtin_icons::Icon::Mail.key().into()),
             ("primary".into(), primary),
             (
                 "secondary".into(),
                 self.notice
                     .clone()
-                    .unwrap_or_else(|| format!("{count} unread")),
+                    .unwrap_or_else(|| trf("{count} unread", &[("count", &count)])),
             ),
             ("count".into(), count.to_string()),
         ]
@@ -100,7 +102,7 @@ impl Widget for MailWidget {
                 Update::Failed(reason) => self.notice = Some(reason),
                 Update::Unconfigured => {
                     self.unread = None;
-                    self.notice = Some("Set mail login in widgets.json".into());
+                    self.notice = Some(tr("Set mail login in widgets.json").into());
                 }
             }
         }
@@ -117,19 +119,19 @@ impl Widget for MailWidget {
         let subjects = self.unread.as_ref().map(|u| u.subjects.len()).unwrap_or(0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
-            proton_tile(ui, "mail");
+            crate::builtin_icons::tile(ui, crate::builtin_icons::Icon::Mail);
             let subject = self.unread.as_ref().and_then(|u| {
                 u.subjects
                     .get(self.index.min(subjects.saturating_sub(1)))
                     .cloned()
             });
             let (first, second) = match (&self.notice, &self.unread) {
-                (Some(notice), _) => (subject.unwrap_or_else(|| "Mail".into()), notice.clone()),
+                (Some(notice), _) => (subject.unwrap_or_else(|| tr("Mail").into()), notice.clone()),
                 (None, Some(u)) if u.count > 0 => (
-                    subject.unwrap_or_else(|| "Unread mail".into()),
-                    format!("{} unread", u.count),
+                    subject.unwrap_or_else(|| tr("Unread mail").into()),
+                    trf("{count} unread", &[("count", &u.count)]),
                 ),
-                (None, _) => ("No unread mail".into(), "Inbox".into()),
+                (None, _) => (tr("No unread mail").into(), tr("Inbox").into()),
             };
             self.shown = two_lines_fixed(ui, &first, &second, compact_width(ui));
         });

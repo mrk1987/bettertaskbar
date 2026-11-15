@@ -1,4 +1,5 @@
 //! Visual layout editor; the live widgets use this same Theme renderer.
+use crate::i18n::{tr, trf};
 use crate::{
     app::Kind,
     config::{self, Config, SharedConfig},
@@ -60,7 +61,7 @@ impl Studio {
         }
         if self.dirty() {
             self.message =
-                Some("Apply or discard the current theme before switching widgets.".into());
+                Some(tr("Apply or discard the current theme before switching widgets.").into());
             return;
         }
         *self = Self::new(kind, cfg);
@@ -81,7 +82,7 @@ impl Studio {
             Ok(()) => {
                 self.saved = self.draft.clone();
                 self.custom = true;
-                self.message = Some("Theme applied to this widget.".into());
+                self.message = Some(tr("Theme applied to this widget.").into());
                 true
             }
             Err(e) => {
@@ -112,9 +113,9 @@ impl Studio {
         }
     }
     pub fn ui(&mut self, ui: &mut egui::Ui, cfg: &SharedConfig) {
-        style::heading(ui,"Theme Studio","Each widget has its own canvas. Drag layers to move them; use the corner handle to resize.");
+        style::heading(ui,tr("Theme Studio"),tr("Each widget has its own canvas. Drag layers to move them; use the corner handle to resize."));
         ui.horizontal(|ui| {
-            ui.label("Widget");
+            ui.label(tr("Widget"));
             let mut kind = self.kind;
             egui::ComboBox::from_id_salt("theme-widget")
                 .selected_text(self.kind.label())
@@ -129,21 +130,21 @@ impl Studio {
             if ui
                 .add_enabled(
                     self.dirty() || !self.custom,
-                    egui::Button::new("Apply theme").fill(style::ACCENT),
+                    egui::Button::new(tr("Apply theme")).fill(style::ACCENT),
                 )
                 .clicked()
             {
                 self.apply(cfg);
             }
             if ui
-                .add_enabled(self.dirty(), egui::Button::new("Discard"))
+                .add_enabled(self.dirty(), egui::Button::new(tr("Discard")))
                 .clicked()
             {
                 self.discard();
             }
             if ui
-                .button("Use original")
-                .on_hover_text("Restore this widget’s original built-in appearance")
+                .button(tr("Use original"))
+                .on_hover_text(tr("Restore this widget’s original built-in appearance"))
                 .clicked()
             {
                 match config::try_update(cfg, |c| self.kind.state_mut(c).theme = None) {
@@ -157,33 +158,33 @@ impl Studio {
         });
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(!self.history.is_empty(), egui::Button::new("Undo"))
+                .add_enabled(!self.history.is_empty(), egui::Button::new(tr("Undo")))
                 .clicked()
             {
                 self.undo();
             }
             if ui
-                .add_enabled(!self.redo.is_empty(), egui::Button::new("Redo"))
+                .add_enabled(!self.redo.is_empty(), egui::Button::new(tr("Redo")))
                 .clicked()
             {
                 self.redo();
             }
-            if ui.button("Import…").clicked() {
+            if ui.button(tr("Import…")).clicked() {
                 self.import();
             }
-            if ui.button("Export…").clicked() {
+            if ui.button(tr("Export…")).clicked() {
                 self.export();
             }
             ui.separator();
-            ui.label("Zoom");
+            ui.label(tr("Zoom"));
             ui.add(
                 egui::Slider::new(&mut self.zoom, 0.5..=4.0)
                     .step_by(0.25)
                     .show_value(false),
             );
             ui.label(format!("{:.0}%", self.zoom * 100.0));
-            ui.checkbox(&mut self.grid, "Grid");
-            ui.checkbox(&mut self.snap, "Snap");
+            ui.checkbox(&mut self.grid, tr("Grid"));
+            ui.checkbox(&mut self.snap, tr("Snap"));
         });
         if let Some(message) = &self.message {
             ui.colored_label(style::MUTED, message);
@@ -191,7 +192,7 @@ impl Studio {
         if !self.custom && !self.dirty() {
             ui.colored_label(
                 style::MUTED,
-                "Editing a starter layout. Apply it to replace this widget’s original appearance.",
+                tr("Editing a starter layout. Apply it to replace this widget’s original appearance."),
             );
         }
         let before = self.draft.clone();
@@ -241,13 +242,13 @@ impl Studio {
         }
     }
     fn layers(&mut self, ui: &mut egui::Ui, height: f32) {
-        ui.label(egui::RichText::new("Layers").size(16.0).strong());
-        ui.menu_button("Add layer", |ui| {
+        ui.label(egui::RichText::new(tr("Layers")).size(16.0).strong());
+        ui.menu_button(tr("Add layer"), |ui| {
             for (name, kind) in [
-                ("Text", ElementKind::Text),
-                ("Rectangle", ElementKind::Rectangle),
-                ("Progress bar", ElementKind::Progress),
-                ("Icon", ElementKind::Icon),
+                (tr("Text"), ElementKind::Text),
+                (tr("Rectangle"), ElementKind::Rectangle),
+                (tr("Progress bar"), ElementKind::Progress),
+                (tr("Icon"), ElementKind::Icon),
             ] {
                 if ui
                     .add_enabled(self.draft.elements.len() < 64, egui::Button::new(name))
@@ -278,34 +279,40 @@ impl Studio {
         if let Some(i) = self.selected.filter(|i| *i < self.draft.elements.len()) {
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(i + 1 < self.draft.elements.len(), egui::Button::new("Up"))
+                    .add_enabled(
+                        i + 1 < self.draft.elements.len(),
+                        egui::Button::new(tr("Up")),
+                    )
                     .clicked()
                 {
                     self.draft.elements.swap(i, i + 1);
                     self.selected = Some(i + 1);
                 }
-                if ui.add_enabled(i > 0, egui::Button::new("Down")).clicked() {
+                if ui
+                    .add_enabled(i > 0, egui::Button::new(tr("Down")))
+                    .clicked()
+                {
                     self.draft.elements.swap(i, i - 1);
                     self.selected = Some(i - 1);
                 }
             });
-            if ui.button("Duplicate").clicked() && self.draft.elements.len() < 64 {
+            if ui.button(tr("Duplicate")).clicked() && self.draft.elements.len() < 64 {
                 let mut e = self.draft.elements[i].clone();
-                e.name = format!("{} copy", e.name);
+                e.name = trf("{name} copy", &[("name", &e.name)]);
                 self.draft.elements.push(e);
                 self.selected = Some(self.draft.elements.len() - 1);
             }
-            if ui.button("Delete layer").clicked() {
+            if ui.button(tr("Delete layer")).clicked() {
                 self.draft.elements.remove(i);
                 self.selected = None;
             }
         }
     }
     fn canvas(&mut self, ui: &mut egui::Ui, height: f32) -> egui::Rect {
-        ui.label(egui::RichText::new("Preview").size(16.0).strong());
+        ui.label(egui::RichText::new(tr("Preview")).size(16.0).strong());
         ui.colored_label(
             style::MUTED,
-            "Sample data. Your account details never enter a theme.",
+            tr("Sample data. Your account details never enter a theme."),
         );
         egui::ScrollArea::both()
             .id_salt("theme-canvas-scroll")
@@ -402,32 +409,32 @@ impl Studio {
             .inner
     }
     fn inspector(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Canvas").size(16.0).strong());
+        ui.label(egui::RichText::new(tr("Canvas")).size(16.0).strong());
         ui.horizontal(|ui| {
-            ui.label("Width");
+            ui.label(tr("Width"));
             ui.add(egui::DragValue::new(&mut self.draft.width).range(48.0..=1600.0));
-            ui.label("Height");
+            ui.label(tr("Height"));
             ui.add(egui::DragValue::new(&mut self.draft.height).range(24.0..=256.0));
         });
         ui.horizontal(|ui| {
-            ui.label("Background");
+            ui.label(tr("Background"));
             ui.color_edit_button_srgba_unmultiplied(&mut self.draft.background);
         });
         ui.add_space(14.0);
         let Some(e) = self.selected.and_then(|i| self.draft.elements.get_mut(i)) else {
-            ui.colored_label(style::MUTED, "Select a layer to edit its properties.");
+            ui.colored_label(style::MUTED, tr("Select a layer to edit its properties."));
             return;
         };
-        ui.label(egui::RichText::new("Layer").size(16.0).strong());
-        style::field(ui, "Name", &mut e.name, false);
+        ui.label(egui::RichText::new(tr("Layer")).size(16.0).strong());
+        style::field(ui, tr("Name"), &mut e.name, false);
         egui::Grid::new("theme-properties")
             .num_columns(2)
             .show(ui, |ui| {
                 for (label, value) in [
                     ("X", &mut e.x),
                     ("Y", &mut e.y),
-                    ("Width", &mut e.width),
-                    ("Height", &mut e.height),
+                    (tr("Width"), &mut e.width),
+                    (tr("Height"), &mut e.height),
                 ] {
                     ui.label(label);
                     ui.add(egui::DragValue::new(value).speed(0.5).range(0.0..=1600.0));
@@ -435,35 +442,39 @@ impl Studio {
                 }
             });
         if matches!(e.kind, ElementKind::Text | ElementKind::Icon) {
-            style::field(ui, "Text / data template", &mut e.text, false);
+            style::field(ui, tr("Text / data template"), &mut e.text, false);
             ui.horizontal(|ui| {
-                ui.label("Font size");
+                ui.label(tr("Font size"));
                 ui.add(egui::DragValue::new(&mut e.font_size).range(6.0..=96.0));
             });
         }
         if matches!(e.kind, ElementKind::Progress | ElementKind::Icon) {
-            style::field(ui, "Data binding", &mut e.binding, false);
+            style::field(ui, tr("Data binding"), &mut e.binding, false);
         }
         ui.horizontal(|ui| {
-            ui.label("Text / track color");
+            ui.label(tr("Text / track color"));
             ui.color_edit_button_srgba_unmultiplied(&mut e.color);
         });
         ui.horizontal(|ui| {
-            ui.label("Fill");
+            ui.label(tr("Fill"));
             ui.color_edit_button_srgba_unmultiplied(&mut e.fill);
         });
         ui.horizontal(|ui| {
-            ui.label("Corner radius");
+            ui.label(tr("Corner radius"));
             ui.add(egui::DragValue::new(&mut e.radius).range(0.0..=128.0));
         });
         ui.add_space(14.0);
-        ui.label(egui::RichText::new("Available data").strong());
+        ui.label(egui::RichText::new(tr("Available data")).strong());
         for (key, value) in theme::sample(self.kind) {
             if key != "icon" {
                 ui.label(format!("{{{key}}}  {value}"));
             }
         }
-        ui.label("Icons use the icon binding. Progress bars use numeric data from 0 to 100.");
+        ui.label(tr(
+            "Icon elements bound to icon show the widget's own icon, as on the \
+             default pill, and follow what it shows (weather, bus or tram, paused). \
+             Progress bars use numeric data from 0 to 100.",
+        ));
     }
     fn import(&mut self) {
         let Some(path) = crate::theme_file::choose(false) else {
@@ -475,7 +486,7 @@ impl Studio {
                 let previous = std::mem::replace(&mut self.draft, theme);
                 self.remember(previous);
                 self.selected = None;
-                self.message = Some("Theme imported. Apply it to update this widget.".into());
+                self.message = Some(tr("Theme imported. Apply it to update this widget.").into());
             }
             Err(e) => self.message = Some(e),
         }
@@ -487,7 +498,7 @@ impl Studio {
         }
         if let Some(path) = crate::theme_file::choose(true) {
             self.message = Some(match crate::theme_file::write(&path, &self.draft) {
-                Ok(()) => "Theme exported. Account settings are not included.".into(),
+                Ok(()) => tr("Theme exported. Account settings are not included.").into(),
                 Err(e) => e,
             });
         }

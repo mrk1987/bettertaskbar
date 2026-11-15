@@ -14,6 +14,7 @@
 //! road data is available it says Unknown, never None, so a missing source
 //! cannot pass for clear roads.
 
+use crate::i18n::{tr, trf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -62,18 +63,31 @@ impl Mode {
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::Bus => "Bus",
-            Self::Tram => "Tram",
-            Self::Metro => "Metro",
-            Self::Train => "Train",
-            Self::Boat => "Boat",
-            Self::Other => "Line",
+            Self::Bus => tr("Bus"),
+            Self::Tram => tr("Tram"),
+            Self::Metro => tr("Metro"),
+            Self::Train => tr("Train"),
+            Self::Boat => tr("Boat"),
+            Self::Other => tr("Line"),
         }
     }
     /// Runs in road traffic, so road situations matter.
     fn on_road(self) -> bool {
         matches!(self, Self::Bus | Self::Tram | Self::Other)
     }
+}
+
+/// The mode's icon: a colored tile with a white pictogram.
+fn mode_icon(mode: Option<Mode>) -> crate::builtin_icons::Icon {
+    use crate::builtin_icons::Transit;
+    crate::builtin_icons::Icon::Transit(match mode {
+        Some(Mode::Bus) => Transit::Bus,
+        Some(Mode::Tram) => Transit::Tram,
+        Some(Mode::Metro) => Transit::Metro,
+        Some(Mode::Train) => Transit::Train,
+        Some(Mode::Boat) => Transit::Boat,
+        Some(Mode::Other) | None => Transit::Other,
+    })
 }
 
 /// The traffic indicator. `Unknown` when there is no usable data.
@@ -89,11 +103,11 @@ pub enum Level {
 impl Level {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Unknown => "Unknown",
-            Self::None => "None",
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
+            Self::Unknown => tr("Unknown"),
+            Self::None => tr("None"),
+            Self::Low => tr("Low"),
+            Self::Medium => tr("Medium"),
+            Self::High => tr("High"),
         }
     }
     fn color(self) -> egui::Color32 {
@@ -209,11 +223,11 @@ pub fn search_stops(query: &str) -> Result<Vec<Stop>, String> {
         .header("ET-Client-Name", CLIENT_NAME)
         .header("User-Agent", crate::http::USER_AGENT)
         .call()
-        .map_err(|e| format!("Stop search failed: {e}"))?;
+        .map_err(|e| trf("Stop search failed: {error}", &[("error", &e)]))?;
     let json: Value = response
         .body_mut()
         .read_json()
-        .map_err(|e| format!("Cannot read stop search results: {e}"))?;
+        .map_err(|e| trf("Cannot read stop search results: {error}", &[("error", &e)]))?;
     Ok(parse_stops(&json))
 }
 
@@ -599,9 +613,9 @@ pub fn combine(mode: Mode, road: Option<Level>, disruption: Option<Level>) -> Le
 }
 
 pub fn fetch(cfg: &DeparturesCfg) -> Result<Board, String> {
-    let stop = cfg.stop.as_ref().ok_or("No stop chosen")?;
+    let stop = cfg.stop.as_ref().ok_or(tr("No stop chosen"))?;
     if !valid_id(&stop.id) {
-        return Err("The saved stop id is not an Entur id".into());
+        return Err(tr("The saved stop id is not an Entur id").into());
     }
     let json = graphql(&format!(
         "{{ stopPlace(id: \"{}\") {{ name estimatedCalls(numberOfDepartures: 40, timeRange: 14400) {{ \
@@ -612,7 +626,10 @@ pub fn fetch(cfg: &DeparturesCfg) -> Result<Board, String> {
         stop.id
     ))?;
     if json["data"]["stopPlace"].is_null() {
-        return Err(format!("Entur does not know stop {}", stop.id));
+        return Err(trf(
+            "Entur does not know stop {stop}",
+            &[("stop", &stop.id)],
+        ));
     }
     let now = Utc::now();
     let departures = parse_departures(&json, cfg, now);
@@ -665,9 +682,9 @@ pub fn fetch(cfg: &DeparturesCfg) -> Result<Board, String> {
 pub fn countdown(expected: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let secs = (expected - now).num_seconds();
     if secs < 60 {
-        "now".into()
+        tr("now").into()
     } else if secs < 3600 {
-        format!("{} min", secs / 60)
+        trf("{minutes} min", &[("minutes", &(secs / 60))])
     } else {
         expected.with_timezone(&Local).format("%H:%M").to_string()
     }
@@ -689,7 +706,7 @@ fn text_width(ui: &egui::Ui) -> f32 {
             .x
         })
     };
-    measure("Traffic: Unknown", 11.0)
+    measure(tr("Traffic: Unknown"), 11.0)
         .max(measure("31 · 10 min", 12.0))
         .ceil()
 }
@@ -703,7 +720,7 @@ pub fn headline(d: &Departure, now: DateTime<Utc>) -> String {
         d.line.clone()
     };
     if d.cancelled {
-        return format!("{name} · cancelled");
+        return trf("{line} · cancelled", &[("line", &name)]);
     }
     let mut text = format!("{name} · {}", countdown(d.expected, now));
     let delay = d.delay_minutes();
@@ -750,7 +767,7 @@ impl DeparturesWidget {
             rx,
             board: None,
             fetched: None,
-            notice: Some("Loading…".into()),
+            notice: Some(tr("Loading…").into()),
         }
     }
 
@@ -778,101 +795,11 @@ impl DeparturesWidget {
             (Some(d), None) => (
                 Some(d.mode),
                 headline(d, now),
-                format!("Traffic: {}", self.traffic().label()),
+                trf("Traffic: {level}", &[("level", &self.traffic().label())]),
             ),
             (Some(d), Some(n)) => (Some(d.mode), headline(d, now), n.clone()),
-            (None, Some(n)) => (None, "Next Departure".into(), n.clone()),
-            (None, None) => (None, "No departures".into(), "Next 4 hours".into()),
-        }
-    }
-}
-
-/// The mode's tile: a colored square with a white pictogram.
-fn mode_tile(ui: &mut egui::Ui, mode: Option<Mode>) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
-    let p = ui.painter();
-    let fill = match mode {
-        Some(Mode::Bus) => egui::Color32::from_rgb(0xD2, 0x3C, 0x3C),
-        Some(Mode::Tram) => egui::Color32::from_rgb(0x1E, 0x88, 0xE5),
-        Some(Mode::Metro) => egui::Color32::from_rgb(0xE8, 0x6E, 0x10),
-        Some(Mode::Train) => egui::Color32::from_rgb(0x2E, 0x9E, 0x5B),
-        Some(Mode::Boat) => egui::Color32::from_rgb(0x12, 0x8F, 0xA8),
-        _ => egui::Color32::from_rgb(0x5A, 0x63, 0x73),
-    };
-    p.rect_filled(rect, 6.0, fill);
-    let c = rect.center();
-    let w = egui::Color32::WHITE;
-    let s = egui::Stroke::new(1.4, w);
-    let r = |x: f32, y: f32, ww: f32, hh: f32| {
-        egui::Rect::from_min_size(c + egui::vec2(x, y), egui::vec2(ww, hh))
-    };
-    match mode {
-        Some(Mode::Bus) | None | Some(Mode::Other) => {
-            // Front of a bus: body, windscreen, wheels.
-            p.rect_stroke(r(-6.0, -7.5, 12.0, 13.0), 2.5, s, egui::StrokeKind::Middle);
-            p.rect_filled(r(-4.5, -5.5, 9.0, 4.5), 1.0, w);
-            p.circle_filled(c + egui::vec2(-3.5, 2.5), 1.1, w);
-            p.circle_filled(c + egui::vec2(3.5, 2.5), 1.1, w);
-            p.rect_filled(r(-5.5, 5.5, 2.5, 2.5), 0.5, w);
-            p.rect_filled(r(3.0, 5.5, 2.5, 2.5), 0.5, w);
-        }
-        Some(Mode::Tram) => {
-            // Car with a pantograph to the overhead wire.
-            p.line_segment([c + egui::vec2(-5.0, -9.0), c + egui::vec2(5.0, -9.0)], s);
-            p.line_segment([c + egui::vec2(0.0, -9.0), c + egui::vec2(-2.5, -5.5)], s);
-            p.line_segment([c + egui::vec2(-2.5, -5.5), c + egui::vec2(0.0, -4.5)], s);
-            p.rect_stroke(r(-6.0, -4.5, 12.0, 11.0), 2.0, s, egui::StrokeKind::Middle);
-            p.rect_filled(r(-4.5, -3.0, 9.0, 4.0), 1.0, w);
-            p.circle_filled(c + egui::vec2(-3.0, 3.5), 1.0, w);
-            p.circle_filled(c + egui::vec2(3.0, 3.5), 1.0, w);
-            p.line_segment([c + egui::vec2(-7.0, 8.5), c + egui::vec2(7.0, 8.5)], s);
-        }
-        Some(Mode::Metro) => {
-            // Round metro sign with an M.
-            p.circle_stroke(c, 8.5, egui::Stroke::new(1.6, w));
-            let m = [
-                c + egui::vec2(-4.0, 4.0),
-                c + egui::vec2(-4.0, -4.0),
-                c + egui::vec2(0.0, 0.5),
-                c + egui::vec2(4.0, -4.0),
-                c + egui::vec2(4.0, 4.0),
-            ];
-            p.add(egui::Shape::line(m.to_vec(), egui::Stroke::new(1.7, w)));
-        }
-        Some(Mode::Train) => {
-            // Locomotive front with a sloped nose on rails.
-            let body = vec![
-                c + egui::vec2(-5.0, -8.0),
-                c + egui::vec2(5.0, -8.0),
-                c + egui::vec2(6.5, 4.0),
-                c + egui::vec2(-6.5, 4.0),
-            ];
-            p.add(egui::Shape::closed_line(body, s));
-            p.rect_filled(r(-3.8, -6.0, 7.6, 4.0), 1.0, w);
-            p.circle_filled(c + egui::vec2(-3.3, 1.5), 1.0, w);
-            p.circle_filled(c + egui::vec2(3.3, 1.5), 1.0, w);
-            p.line_segment([c + egui::vec2(-4.0, 4.0), c + egui::vec2(-6.0, 8.5)], s);
-            p.line_segment([c + egui::vec2(4.0, 4.0), c + egui::vec2(6.0, 8.5)], s);
-            p.line_segment([c + egui::vec2(-5.0, 6.5), c + egui::vec2(5.0, 6.5)], s);
-        }
-        Some(Mode::Boat) => {
-            // Hull, cabin and a wave.
-            let hull = vec![
-                c + egui::vec2(-8.0, 0.5),
-                c + egui::vec2(8.0, 0.5),
-                c + egui::vec2(5.5, 4.5),
-                c + egui::vec2(-5.5, 4.5),
-            ];
-            p.add(egui::Shape::convex_polygon(hull, w, egui::Stroke::NONE));
-            p.rect_stroke(r(-4.0, -4.5, 7.0, 5.0), 1.0, s, egui::StrokeKind::Middle);
-            p.line_segment([c + egui::vec2(1.0, -4.5), c + egui::vec2(1.0, -8.0)], s);
-            let wave: Vec<_> = (0..=8)
-                .map(|i| {
-                    let x = -8.0 + i as f32 * 2.0;
-                    c + egui::vec2(x, 7.5 + if i % 2 == 0 { 0.0 } else { 1.2 })
-                })
-                .collect();
-            p.add(egui::Shape::line(wave, egui::Stroke::new(1.1, w)));
+            (None, Some(n)) => (None, tr("Next Departure").into(), n.clone()),
+            (None, None) => (None, tr("No departures").into(), tr("Next 4 hours").into()),
         }
     }
 }
@@ -885,7 +812,7 @@ impl Widget for DeparturesWidget {
 
     fn refresh(&mut self) {
         self.refresh.request();
-        self.notice = Some("Refresh requested…".into());
+        self.notice = Some(tr("Refresh requested…").into());
     }
 
     fn tick(&mut self) {
@@ -901,7 +828,7 @@ impl Widget for DeparturesWidget {
                 Update::Failed(reason) => self.notice = Some(reason),
                 Update::Unconfigured => {
                     self.board = None;
-                    self.notice = Some("Choose a stop in settings".into());
+                    self.notice = Some(tr("Choose a stop in settings").into());
                 }
             }
         }
@@ -912,6 +839,7 @@ impl Widget for DeparturesWidget {
         let now = Utc::now();
         let next = self.next(now);
         [
+            ("icon".into(), mode_icon(mode).key().into()),
             ("primary".into(), primary),
             ("secondary".into(), secondary),
             ("traffic".into(), self.traffic().label().into()),
@@ -938,7 +866,7 @@ impl Widget for DeparturesWidget {
         let (mode, first, second) = self.lines();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
-            mode_tile(ui, mode);
+            crate::builtin_icons::tile(ui, mode_icon(mode));
             if self.notice.is_none() && mode.is_some() {
                 let level = self.traffic();
                 ui.vertical(|ui| {
@@ -954,7 +882,7 @@ impl Widget for DeparturesWidget {
                     let font = egui::FontId::proportional(11.0);
                     let mut job = egui::text::LayoutJob::default();
                     job.append(
-                        "Traffic: ",
+                        tr("Traffic: "),
                         0.0,
                         egui::TextFormat::simple(font.clone(), ui.visuals().weak_text_color()),
                     );
@@ -1050,7 +978,7 @@ mod tests {
                                 Some(Mode::Boat),
                                 None,
                             ] {
-                                mode_tile(ui, mode);
+                                crate::builtin_icons::tile(ui, mode_icon(mode));
                             }
                         });
                     });

@@ -1,5 +1,6 @@
 //! CalDAV next-event pill: Proton Calendar icon + "Now" / "Next" lines.
 
+use crate::i18n::tr;
 use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui;
@@ -49,44 +50,8 @@ impl CalendarWidget {
             refresh,
             rx,
             lines: None,
-            notice: Some("Loading…".into()),
+            notice: Some(tr("Loading…").into()),
         }
-    }
-}
-
-pub(crate) fn proton_tile(ui: &mut egui::Ui, kind: &str) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 6.0, egui::Color32::from_rgb(0x6D, 0x4A, 0xFF));
-    let c = rect.center();
-    let stroke = egui::Stroke::new(1.6, egui::Color32::WHITE);
-    if kind == "calendar" {
-        let body = egui::Rect::from_center_size(c + egui::vec2(0.0, 1.0), egui::vec2(14.0, 12.0));
-        p.rect_stroke(body, 2.0, stroke, egui::StrokeKind::Middle);
-        p.line_segment(
-            [
-                egui::pos2(body.left(), body.top() + 3.0),
-                egui::pos2(body.right(), body.top() + 3.0),
-            ],
-            stroke,
-        );
-    } else {
-        let body = egui::Rect::from_center_size(c, egui::vec2(14.0, 10.0));
-        p.rect_stroke(body, 2.0, stroke, egui::StrokeKind::Middle);
-        p.line_segment(
-            [
-                egui::pos2(body.left(), body.top()),
-                egui::pos2(c.x, c.y + 1.0),
-            ],
-            stroke,
-        );
-        p.line_segment(
-            [
-                egui::pos2(body.right(), body.top()),
-                egui::pos2(c.x, c.y + 1.0),
-            ],
-            stroke,
-        );
     }
 }
 
@@ -120,13 +85,13 @@ fn lines(ui: &mut egui::Ui, a: &str, b: &str) -> bool {
 }
 
 /// The text width of the compact Mail and Calendar pills: just room for
-/// "No unread mail", so the two pills are the same size and anything longer
+/// tr("No unread mail"), so the two pills are the same size and anything longer
 /// scrolls.
 pub(crate) fn compact_width(ui: &egui::Ui) -> f32 {
     ui.ctx()
         .fonts_mut(|f| {
             f.layout_no_wrap(
-                "No unread mail".into(),
+                tr("No unread mail").into(),
                 egui::FontId::proportional(12.0),
                 egui::Color32::WHITE,
             )
@@ -144,19 +109,23 @@ impl Widget for CalendarWidget {
 
     fn refresh(&mut self) {
         self.refresh.request();
-        self.notice = Some("Refresh requested…".into());
+        self.notice = Some(tr("Refresh requested…").into());
     }
 
     fn values(&self) -> crate::theme::Values {
         let lines = self.lines.clone().unwrap_or_default();
         [
             (
+                "icon".into(),
+                crate::builtin_icons::Icon::Calendar.key().into(),
+            ),
+            (
                 "primary".into(),
                 lines
                     .now
                     .clone()
                     .or(lines.next.clone())
-                    .unwrap_or_else(|| "No upcoming events".into()),
+                    .unwrap_or_else(|| tr("No upcoming events").into()),
             ),
             (
                 "secondary".into(),
@@ -165,7 +134,7 @@ impl Widget for CalendarWidget {
                     .or(if lines.now.is_some() {
                         lines.next
                     } else {
-                        Some("Free now".into())
+                        Some(tr("Free now").into())
                     })
                     .unwrap_or_default(),
             ),
@@ -184,7 +153,7 @@ impl Widget for CalendarWidget {
                 Update::Failed(reason) => self.notice = Some(reason),
                 Update::Unconfigured => {
                     self.lines = None;
-                    self.notice = Some("Set calendar login in widgets.json".into());
+                    self.notice = Some(tr("Set calendar login in widgets.json").into());
                 }
             }
         }
@@ -193,19 +162,19 @@ impl Widget for CalendarWidget {
     fn ui(&mut self, ui: &mut egui::Ui, _icons: &mut IconCache) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
-            proton_tile(ui, "calendar");
+            crate::builtin_icons::tile(ui, crate::builtin_icons::Icon::Calendar);
             let lines = self.lines.clone().unwrap_or_default();
             let (first, second) = match (&self.notice, lines.now, lines.next) {
                 (Some(notice), now, next) => (
-                    now.or(next).unwrap_or_else(|| "Calendar".into()),
+                    now.or(next).unwrap_or_else(|| tr("Calendar").into()),
                     notice.clone(),
                 ),
                 (None, Some(now), next) => {
-                    (now, next.unwrap_or_else(|| "Nothing after this".into()))
+                    (now, next.unwrap_or_else(|| tr("Nothing after this").into()))
                 }
                 // Nothing on right now: lead with what comes next.
-                (None, None, Some(next)) => (next, "Free now".into()),
-                (None, None, None) => ("No upcoming events".into(), "Next 14 days".into()),
+                (None, None, Some(next)) => (next, tr("Free now").into()),
+                (None, None, None) => (tr("No upcoming events").into(), tr("Next 14 days").into()),
             };
             two_lines_fixed(ui, &first, &second, compact_width(ui));
         });

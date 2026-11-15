@@ -2,6 +2,7 @@ use crate::{
     app::Kind,
     config::{self, Config, SharedConfig},
     dashboard_style as style,
+    i18n::{tr, trf},
     place_search::PlaceSearch,
     studio::Studio,
 };
@@ -30,6 +31,7 @@ const ACTION_MESSAGE: u32 = PAGE_MESSAGE + 1;
 static REQUESTED_ACTION: AtomicUsize = AtomicUsize::new(usize::MAX);
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
+    General,
     Widgets,
     Weather,
     Calendar,
@@ -68,6 +70,7 @@ impl Page {
     }
     pub fn key(self) -> &'static str {
         match self {
+            Self::General => "general",
             Self::Widgets => "widgets",
             Self::Weather => "weather",
             Self::Calendar => "calendar",
@@ -82,6 +85,7 @@ impl Page {
     }
     pub fn parse(key: &str) -> Self {
         match key {
+            "general" => Self::General,
             "weather" => Self::Weather,
             "calendar" => Self::Calendar,
             "mail" => Self::Mail,
@@ -96,19 +100,21 @@ impl Page {
     }
     fn title(self) -> &'static str {
         match self {
-            Self::Widgets => "Widgets",
-            Self::Weather => "Weather",
-            Self::Calendar => "Calendar",
-            Self::Mail => "Mail",
-            Self::NowPlaying => "Now Playing",
-            Self::Departures => "Next Departure",
-            Self::News => "News",
-            Self::Usage => "Usage providers",
-            Self::Studio => "Theme Studio",
-            Self::About => "About",
+            Self::General => tr("General"),
+            Self::Widgets => tr("Widgets"),
+            Self::Weather => tr("Weather"),
+            Self::Calendar => tr("Calendar"),
+            Self::Mail => tr("Mail"),
+            Self::NowPlaying => tr("Now Playing"),
+            Self::Departures => tr("Next Departure"),
+            Self::News => tr("News"),
+            Self::Usage => tr("Usage providers"),
+            Self::Studio => tr("Theme Studio"),
+            Self::About => tr("About"),
         }
     }
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
+        Self::General,
         Self::Widgets,
         Self::Weather,
         Self::Calendar,
@@ -272,7 +278,7 @@ impl Dashboard {
                 }
                 self.notice = Some((
                     true,
-                    "Settings saved. Widgets pick up changes automatically.".into(),
+                    tr("Settings saved. Widgets pick up changes automatically.").into(),
                 ));
                 true
             }
@@ -325,7 +331,13 @@ impl Dashboard {
                 let saved = kind.state(&self.cfg.lock().unwrap()).double_click.clone();
                 kind.state_mut(&mut self.base).double_click = saved.clone();
                 kind.state_mut(&mut self.draft).double_click = saved;
-                self.notice = Some((true, format!("{} double-click action saved.", kind.label())));
+                self.notice = Some((
+                    true,
+                    trf(
+                        "{widget} double-click action saved.",
+                        &[("widget", &kind.label())],
+                    ),
+                ));
             }
             Err(error) => self.notice = Some((false, error)),
         }
@@ -343,7 +355,7 @@ impl Dashboard {
             let click = &mut kind.state_mut(&mut self.draft).double_click;
             let mut action = click.action(kind);
             ui.horizontal(|ui| {
-                let label = ui.label("On double-click");
+                let label = ui.label(tr("On double-click"));
                 egui::ComboBox::from_id_salt("mode").selected_text(action.label_for(kind)).show_ui(ui, |ui| {
                     for a in Action::for_kind(kind) { ui.selectable_value(&mut action, a, a.label_for(kind)); }
                 }).response.labelled_by(label.id);
@@ -353,22 +365,22 @@ impl Dashboard {
                 Action::OpenUrl => {
                     let label = ui.label("URL");
                     ui.add(egui::TextEdit::singleline(&mut click.url).hint_text(&default_url).desired_width(ui.available_width())).labelled_by(label.id);
-                    ui.label(egui::RichText::new(format!("Blank uses {default_url}")).color(style::MUTED));
+                    ui.label(egui::RichText::new(trf("Blank uses {url}", &[("url", &default_url)])).color(style::MUTED));
                 }
-                Action::Refresh => { ui.label(egui::RichText::new("Fetches this widget’s data again. Repeated requests wait for the 30-second cooldown.").color(style::MUTED)); }
+                Action::Refresh => { ui.label(egui::RichText::new(tr("Fetches this widget’s data again. Repeated requests wait for the 30-second cooldown.")).color(style::MUTED)); }
                 Action::OpenItem => {
                     let text = match kind {
-                        Kind::News => "Opens the article for the headline on screen. The headline holds still while you click.",
-                        Kind::NowPlaying => "Brings up the app that is playing.",
-                        _ => "Opens what the widget shows.",
+                        Kind::News => tr("Opens the article for the headline on screen. The headline holds still while you click."),
+                        Kind::NowPlaying => tr("Brings up the app that is playing."),
+                        _ => tr("Opens what the widget shows."),
                     };
                     ui.label(egui::RichText::new(text).color(style::MUTED));
                 }
                 Action::LaunchApp => {
-                    let label = ui.label("Application (.exe)");
+                    let label = ui.label(tr("Application (.exe)"));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut click.app).hint_text("C:\\Program Files\\App\\App.exe").desired_width((ui.available_width() - 100.0).max(120.0))).labelled_by(label.id);
-                        if ui.button("Browse…").clicked() {
+                        if ui.button(tr("Browse…")).clicked() {
                             if let Some(path) = crate::click_action::choose_app() { click.app = path; }
                         }
                     });
@@ -377,12 +389,12 @@ impl Dashboard {
             let valid = kind.state(&self.draft).double_click.resolve(kind, &self.draft);
             if let Err(error) = &valid { ui.colored_label(style::DANGER, error); }
             else if let Ok(Target::App(path)) = &valid {
-                if !path.is_file() { ui.colored_label(style::MUTED, "This app is not currently at that path."); }
+                if !path.is_file() { ui.colored_label(style::MUTED, tr("This app is not currently at that path.")); }
             }
             let dirty = kind.state(&self.draft).double_click != kind.state(&self.base).double_click;
             ui.horizontal(|ui| {
-                if ui.add_enabled(dirty && valid.is_ok(), egui::Button::new("Apply action").fill(style::ACCENT)).clicked() { self.save_action(kind); }
-                if ui.add_enabled(dirty, egui::Button::new("Discard action edits")).clicked() {
+                if ui.add_enabled(dirty && valid.is_ok(), egui::Button::new(tr("Apply action")).fill(style::ACCENT)).clicked() { self.save_action(kind); }
+                if ui.add_enabled(dirty, egui::Button::new(tr("Discard action edits"))).clicked() {
                     kind.state_mut(&mut self.draft).double_click = kind.state(&self.base).double_click.clone();
                 }
             });
@@ -392,25 +404,28 @@ impl Dashboard {
         style::heading(
             ui,
             if usage_only {
-                "Usage providers"
+                tr("Usage providers")
             } else {
-                "Widgets"
+                tr("Widgets")
             },
             if usage_only {
-                "Usage widgets use the sign-in from each provider’s app or CLI."
+                tr("Usage widgets use the sign-in from each provider’s app or CLI.")
             } else {
-                "Choose what lives on your taskbar. Each widget has its own settings and theme."
+                tr("Choose what lives on your taskbar. Each widget has its own settings and theme.")
             },
         );
         let current = self.cfg.lock().unwrap().clone();
         if usage_only {
             style::group(ui, |ui| {
-                ui.label(egui::RichText::new("Refresh").size(16.0).strong());
+                ui.label(egui::RichText::new(tr("Refresh")).size(16.0).strong());
                 ui.horizontal(|ui| {
                     for minutes in config::USAGE_REFRESH_CHOICES {
                         let chosen = current.usage_refresh().as_secs() == minutes * 60;
                         if ui
-                            .selectable_label(chosen, format!("Every {minutes} min"))
+                            .selectable_label(
+                                chosen,
+                                trf("Every {minutes} min", &[("minutes", &minutes)]),
+                            )
                             .clicked()
                             && !chosen
                         {
@@ -424,26 +439,8 @@ impl Dashboard {
                 });
                 ui.colored_label(
                     style::MUTED,
-                    "How often each enabled provider is asked for its usage. Less often means fewer requests to the provider.",
+                    tr("How often each enabled provider is asked for its usage. Less often means fewer requests to the provider."),
                 );
-            });
-            ui.add_space(12.0);
-        }
-        if !usage_only {
-            style::group(ui, |ui| {
-                ui.label(egui::RichText::new("Taskbar placement").size(16.0).strong());
-                let mut unmagnetise = !current.magnetized;
-                if ui
-                    .checkbox(&mut unmagnetise, "Unmagnetise taskbar widgets")
-                    .changed()
-                {
-                    if let Err(error) =
-                        config::try_update(&self.cfg, |c| c.magnetized = !unmagnetise)
-                    {
-                        self.notice = Some((false, error));
-                    }
-                }
-                ui.colored_label(style::MUTED,"By default, right-side widgets pack toward the system tray and left-side widgets pack toward the left edge. Unmagnetise to keep manual positions.");
             });
             ui.add_space(12.0);
         }
@@ -475,26 +472,26 @@ impl Dashboard {
                     // On the Usage page the providers' settings are this page:
                     // a Settings button would lead back to itself.
                     if (Page::of(kind) != Page::Usage || !usage_only)
-                        && ui.button("Settings").clicked()
+                        && ui.button(tr("Settings")).clicked()
                     {
                         self.page = Page::of(kind);
                     }
-                    if ui.button("Edit theme").clicked() {
+                    if ui.button(tr("Edit theme")).clicked() {
                         self.studio.select(kind, &current);
                         self.page = Page::Studio;
                     }
                     let mut placement = kind.state(&current).placement;
                     egui::ComboBox::from_id_salt(("widget-placement", kind.key()))
                         .selected_text(match placement {
-                            config::Placement::Taskbar => "Taskbar",
-                            config::Placement::Desktop => "Desktop",
-                            config::Placement::Floating => "Floating",
+                            config::Placement::Taskbar => tr("Taskbar"),
+                            config::Placement::Desktop => tr("Desktop"),
+                            config::Placement::Floating => tr("Floating"),
                         })
                         .show_ui(ui, |ui| {
                             for (p, label) in [
-                                (config::Placement::Taskbar, "Taskbar"),
-                                (config::Placement::Desktop, "Desktop"),
-                                (config::Placement::Floating, "Floating"),
+                                (config::Placement::Taskbar, tr("Taskbar")),
+                                (config::Placement::Desktop, tr("Desktop")),
+                                (config::Placement::Floating, tr("Floating")),
                             ] {
                                 ui.selectable_value(&mut placement, p, label);
                             }
@@ -508,7 +505,7 @@ impl Dashboard {
                     }
                     if kind.state(&current).enabled
                         && !kind.state(&current).visible
-                        && ui.button("Show widget").clicked()
+                        && ui.button(tr("Show widget")).clicked()
                     {
                         if let Err(e) =
                             config::try_update(&self.cfg, |c| kind.state_mut(c).visible = true)
@@ -530,9 +527,12 @@ impl Dashboard {
                         ui.colored_label(style::MUTED, crate::widgets::usage::status(provider));
                     }
                 }
-                let label = format!(
-                    "Double-click: {}",
-                    kind.state(&current).double_click.action(kind).label()
+                let label = trf(
+                    "Double-click: {action}",
+                    &[(
+                        "action",
+                        &kind.state(&current).double_click.action(kind).label(),
+                    )],
                 );
                 let focus = self.action_focus == Some(kind);
                 let response = egui::CollapsingHeader::new(label)
@@ -549,26 +549,102 @@ impl Dashboard {
             ui.add_space(8.0);
         }
     }
+    fn general(&mut self, ui: &mut egui::Ui) {
+        style::heading(
+            ui,
+            tr("General"),
+            tr("Settings that apply to every widget and to this window."),
+        );
+        let current = self.cfg.lock().unwrap().clone();
+        style::group(ui, |ui| {
+            ui.label(egui::RichText::new(tr("Language")).size(16.0).strong());
+            let mut language = current.language;
+            ui.horizontal(|ui| {
+                for choice in crate::i18n::Language::ALL {
+                    ui.selectable_value(&mut language, choice, choice.label());
+                }
+            });
+            if language != current.language {
+                if let Err(error) = config::try_update(&self.cfg, |c| c.language = language) {
+                    self.notice = Some((false, error));
+                }
+            }
+            ui.colored_label(
+                style::MUTED,
+                tr("The dashboard, the tray menu and the text on the widgets. \
+                    Same as Windows shows Norwegian when Windows is set to Norwegian."),
+            );
+        });
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.label(
+                egui::RichText::new(tr("Taskbar placement"))
+                    .size(16.0)
+                    .strong(),
+            );
+            let mut magnetized = current.magnetized;
+            if ui
+                .checkbox(&mut magnetized, tr("Magnetic taskbar placement"))
+                .changed()
+            {
+                if let Err(error) = config::try_update(&self.cfg, |c| c.magnetized = magnetized) {
+                    self.notice = Some((false, error));
+                }
+            }
+            ui.colored_label(
+                style::MUTED,
+                tr(
+                    "Right-side widgets pack toward the notification area and left-side \
+                    widgets toward the left edge, and move along when app icons come \
+                    and go. Switch it off to keep each widget exactly where you drop it.",
+                ),
+            );
+            ui.add_space(6.0);
+            ui.label(tr("Place every widget, as in the tray menu"));
+            let common = crate::tray::common_placement(&current);
+            ui.horizontal(|ui| {
+                for (placement, label) in [
+                    (config::Placement::Taskbar, tr("Pin all to taskbar")),
+                    (config::Placement::Desktop, tr("Pin all to desktop")),
+                    (config::Placement::Floating, tr("Float all on top")),
+                ] {
+                    if ui
+                        .selectable_label(common == Some(placement), label)
+                        .clicked()
+                    {
+                        if let Err(error) = config::try_update(&self.cfg, |c| {
+                            for kind in Kind::ALL {
+                                kind.state_mut(c).placement = placement;
+                            }
+                        }) {
+                            self.notice = Some((false, error));
+                        }
+                    }
+                }
+            });
+        });
+    }
+
     fn weather(&mut self, ui: &mut egui::Ui) {
         style::heading(
             ui,
-            "Weather",
-            "Choose a place, keep favorites, or enter coordinates.",
+            tr("Weather"),
+            tr("Choose a place, keep favorites, or enter coordinates."),
         );
         style::group(ui, |ui| self.action_settings(ui, Kind::Weather));
         ui.add_space(12.0);
         style::group(ui, |ui| {
             if let Some(place) = &mut self.draft.weather.place {
-                style::field(ui, "Place", &mut place.name, false);
+                style::field(ui, tr("Place"), &mut place.name, false);
                 ui.horizontal(|ui| {
-                    ui.label("Latitude");
+                    ui.label(tr("Latitude"));
                     ui.add(
                         egui::DragValue::new(&mut place.lat)
                             .speed(0.001)
                             .range(-90.0..=90.0)
                             .max_decimals(4),
                     );
-                    ui.label("Longitude");
+                    ui.label(tr("Longitude"));
                     ui.add(
                         egui::DragValue::new(&mut place.lon)
                             .speed(0.001)
@@ -576,17 +652,17 @@ impl Dashboard {
                             .max_decimals(4),
                     );
                 });
-            } else if ui.button("Set a place").clicked() {
+            } else if ui.button(tr("Set a place")).clicked() {
                 self.draft.weather.place = config::WeatherCfg::default().place;
             }
             ui.horizontal(|ui| {
-                ui.label("Refresh interval (seconds)");
+                ui.label(tr("Refresh interval (seconds)"));
                 ui.add(
                     egui::DragValue::new(&mut self.draft.weather.refresh_secs).range(1800..=86400),
                 );
             });
             if let Some(place) = &self.draft.weather.place {
-                if ui.button("Add current place to favorites").clicked()
+                if ui.button(tr("Add current place to favorites")).clicked()
                     && !self.draft.weather.favorites.contains(place)
                 {
                     self.draft.weather.favorites.push(place.clone());
@@ -595,7 +671,7 @@ impl Dashboard {
         });
         ui.add_space(14.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Find a place").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Find a place")).size(16.0).strong());
             if let Some(place) = self.search.ui(ui) {
                 if !self.draft.weather.favorites.contains(&place) {
                     self.draft.weather.favorites.push(place.clone());
@@ -605,12 +681,12 @@ impl Dashboard {
         });
         ui.add_space(14.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Favorites").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Favorites")).size(16.0).strong());
             let mut remove = None;
             if self.draft.weather.favorites.is_empty() {
                 ui.colored_label(
                     style::MUTED,
-                    "No favorites yet. Search for a place or add your current one.",
+                    tr("No favorites yet. Search for a place or add your current one."),
                 );
             }
             for (i, place) in self.draft.weather.favorites.iter().enumerate() {
@@ -625,7 +701,7 @@ impl Dashboard {
                         {
                             self.draft.weather.place = Some(place.clone());
                         }
-                        if ui.small_button("Remove").clicked() {
+                        if ui.small_button(tr("Remove")).clicked() {
                             remove = Some(i);
                         }
                     });
@@ -639,11 +715,11 @@ impl Dashboard {
     fn connection(&mut self, ui: &mut egui::Ui, mail: bool) {
         style::heading(
             ui,
-            if mail { "Mail" } else { "Calendar" },
+            if mail { tr("Mail") } else { tr("Calendar") },
             if mail {
-                "Connect an IMAP server, such as Proton Mail Bridge."
+                tr("Connect an IMAP server, such as Proton Mail Bridge.")
             } else {
-                "Connect a CalDAV server, such as iOxide."
+                tr("Connect a CalDAV server, such as iOxide.")
             },
         );
         style::group(ui, |ui| {
@@ -653,11 +729,11 @@ impl Dashboard {
         style::group(ui, |ui| {
             if mail {
                 let c = &mut self.draft.mail;
-                style::field(ui, "Server", &mut c.host, false);
+                style::field(ui, tr("Server"), &mut c.host, false);
                 ui.horizontal(|ui| {
-                    ui.label("Port");
+                    ui.label(tr("Port"));
                     ui.add(egui::DragValue::new(&mut c.port).range(1..=65535));
-                    ui.label("Connection");
+                    ui.label(tr("Connection"));
                     egui::ComboBox::from_id_salt("mail-security")
                         .selected_text(&c.security)
                         .show_ui(ui, |ui| {
@@ -666,38 +742,41 @@ impl Dashboard {
                             }
                         });
                 });
-                style::field(ui, "Username", &mut c.username, false);
-                style::field(ui, "Password", &mut c.password, true);
+                style::field(ui, tr("Username"), &mut c.username, false);
+                style::field(ui, tr("Password"), &mut c.password, true);
                 ui.horizontal(|ui| {
-                    ui.label("Refresh (seconds)");
+                    ui.label(tr("Refresh (seconds)"));
                     ui.add(egui::DragValue::new(&mut c.refresh_secs).range(30..=86400));
-                    ui.label("Rotate subject (seconds)");
+                    ui.label(tr("Rotate subject (seconds)"));
                     ui.add(egui::DragValue::new(&mut c.rotate_secs).range(1..=3600));
                 });
             } else {
                 let c = &mut self.draft.calendar;
-                style::field(ui, "Server", &mut c.host, false);
+                style::field(ui, tr("Server"), &mut c.host, false);
                 ui.horizontal(|ui| {
-                    ui.label("Port");
+                    ui.label(tr("Port"));
                     ui.add(egui::DragValue::new(&mut c.port).range(1..=65535));
-                    ui.checkbox(&mut c.tls, "Use TLS (HTTPS)");
+                    ui.checkbox(&mut c.tls, tr("Use TLS (HTTPS)"));
                 });
-                style::field(ui, "Calendar path", &mut c.path, false);
-                style::field(ui, "Username", &mut c.username, false);
-                style::field(ui, "Password", &mut c.password, true);
+                style::field(ui, tr("Calendar path"), &mut c.path, false);
+                style::field(ui, tr("Username"), &mut c.username, false);
+                style::field(ui, tr("Password"), &mut c.password, true);
                 ui.horizontal(|ui| {
-                    ui.label("Refresh interval (seconds)");
+                    ui.label(tr("Refresh interval (seconds)"));
                     ui.add(egui::DragValue::new(&mut c.refresh_secs).range(30..=86400));
                 });
             }
             ui.add_space(8.0);
             ui.colored_label(
                 style::MUTED,
-                "Credentials stay in your local widgets.json file and are stored as plain text.",
+                tr("Credentials stay in your local widgets.json file and are stored as plain text."),
             );
         });
         if ui
-            .add_enabled(self.test.is_none(), egui::Button::new("Test connection"))
+            .add_enabled(
+                self.test.is_none(),
+                egui::Button::new(tr("Test connection")),
+            )
             .clicked()
         {
             let draft = self.draft.clone();
@@ -708,17 +787,21 @@ impl Dashboard {
             let (tx, rx) = mpsc::channel();
             self.test = Some(rx);
             self.test_configuration = Some((mail, draft.clone()));
-            self.notice = Some((true, "Testing connection…".into()));
+            self.notice = Some((true, tr("Testing connection…").into()));
             let ctx = ui.ctx().clone();
             std::thread::spawn(move || {
                 let result = if mail {
-                    crate::imap::fetch(&draft.mail)
-                        .map(|u| format!("Connected. {} unread messages.", u.count))
+                    crate::imap::fetch(&draft.mail).map(|u| {
+                        trf(
+                            "Connected. {count} unread messages.",
+                            &[("count", &u.count)],
+                        )
+                    })
                 } else {
                     crate::caldav::fetch(&draft.calendar).map(|f| {
-                        format!(
-                            "Connected. {} calendars, {} upcoming events.",
-                            f.calendars, f.events
+                        trf(
+                            "Connected. {calendars} calendars, {events} upcoming events.",
+                            &[("calendars", &f.calendars), ("events", &f.events)],
                         )
                     })
                 };
@@ -748,15 +831,15 @@ impl Dashboard {
     fn now_playing(&mut self, ui: &mut egui::Ui) {
         style::heading(
             ui,
-            "Now Playing",
-            "Shows what Windows’ own media controls show: Spotify, browsers, Media Player and other apps that report playback.",
+            tr("Now Playing"),
+            tr("Shows what Windows’ own media controls show: Spotify, browsers, Media Player and other apps that report playback."),
         );
         style::group(ui, |ui| self.action_settings(ui, Kind::NowPlaying));
         ui.add_space(12.0);
         style::group(ui, |ui| {
             ui.colored_label(
                 style::MUTED,
-                "Nothing to set up. The widget reads the current media session every two seconds, on this PC only.",
+                tr("Nothing to set up. The widget reads the current media session every two seconds, on this PC only."),
             );
         });
     }
@@ -764,20 +847,23 @@ impl Dashboard {
     fn departures(&mut self, ui: &mut egui::Ui) {
         style::heading(
             ui,
-            "Next Departure",
-            "Upcoming departures from a saved stop, with a traffic level for the route.",
+            tr("Next Departure"),
+            tr("Upcoming departures from a saved stop, with a traffic level for the route."),
         );
         style::group(ui, |ui| self.action_settings(ui, Kind::Departures));
         ui.add_space(12.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Stop").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Stop")).size(16.0).strong());
             match &self.draft.departures.stop {
                 Some(stop) => {
                     ui.label(&stop.name);
                     ui.colored_label(style::MUTED, &stop.id);
                 }
                 None => {
-                    ui.colored_label(style::MUTED, "No stop chosen yet. Search for one below.");
+                    ui.colored_label(
+                        style::MUTED,
+                        tr("No stop chosen yet. Search for one below."),
+                    );
                 }
             }
             ui.add_space(6.0);
@@ -791,10 +877,10 @@ impl Dashboard {
         });
         ui.add_space(12.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Saved stops").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Saved stops")).size(16.0).strong());
             ui.colored_label(
                 style::MUTED,
-                "Switch between these from the widget’s right-click menu.",
+                tr("Switch between these from the widget’s right-click menu."),
             );
             let mut remove = None;
             for (i, stop) in self.draft.departures.favorites.iter().enumerate() {
@@ -809,7 +895,7 @@ impl Dashboard {
                         {
                             self.draft.departures.stop = Some(stop.clone());
                         }
-                        if ui.small_button("Remove").clicked() {
+                        if ui.small_button(tr("Remove")).clicked() {
                             remove = Some(i);
                         }
                     });
@@ -821,13 +907,13 @@ impl Dashboard {
         });
         ui.add_space(12.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Filters").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Filters")).size(16.0).strong());
             // Start again from the saved list only when it changed some
             // other way (loaded, discarded, saved elsewhere).
             if parse_lines(&self.lines_text) != self.draft.departures.lines {
                 self.lines_text = self.draft.departures.lines.join(", ");
             }
-            ui.label("Lines (comma separated, blank for all)");
+            ui.label(tr("Lines (comma separated, blank for all)"));
             if ui
                 .add(
                     egui::TextEdit::singleline(&mut self.lines_text)
@@ -838,7 +924,7 @@ impl Dashboard {
             {
                 self.draft.departures.lines = parse_lines(&self.lines_text);
             }
-            ui.label("Direction (comma separated, blank for all)");
+            ui.label(tr("Direction (comma separated, blank for all)"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.draft.departures.direction)
                     .hint_text("Sentrum, Helsfyr")
@@ -846,13 +932,15 @@ impl Dashboard {
             );
             ui.colored_label(
                 style::MUTED,
-                "Shows only departures whose final destination, as written on the front \
+                tr(
+                    "Shows only departures whose final destination, as written on the front \
                  of the bus or train, contains one of these. Not case-sensitive, and part \
                  of a name is enough. Use it to see one direction of a line; list every \
                  end stop in that direction when the line has several.",
+                ),
             );
             ui.horizontal(|ui| {
-                ui.label("Refresh (seconds)");
+                ui.label(tr("Refresh (seconds)"));
                 ui.add(
                     egui::DragValue::new(&mut self.draft.departures.refresh_secs).range(30..=3600),
                 );
@@ -860,13 +948,13 @@ impl Dashboard {
         });
         ui.add_space(12.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Traffic").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Traffic")).size(16.0).strong());
             ui.checkbox(
                 &mut self.draft.departures.road_traffic,
-                "Read road situations along the route from Statens vegvesen",
+                tr("Read road situations along the route from Statens vegvesen"),
             );
             ui.horizontal(|ui| {
-                ui.label("Counts situations within (metres)");
+                ui.label(tr("Counts situations within (metres)"));
                 ui.add(
                     egui::DragValue::new(&mut self.draft.departures.traffic_radius_m)
                         .range(50..=2000),
@@ -874,7 +962,7 @@ impl Dashboard {
             });
             ui.colored_label(
                 style::MUTED,
-                "None / Low / Medium / High comes from road situations (accidents, closures, roadworks) near the stops ahead, and from Entur’s disruption messages for the line. A bus running late does not count. With no road data, buses and trams show Unknown rather than None.",
+                tr("None / Low / Medium / High comes from road situations (accidents, closures, roadworks) near the stops ahead, and from Entur’s disruption messages for the line. A bus running late does not count. With no road data, buses and trams show Unknown rather than None."),
             );
         });
     }
@@ -882,16 +970,16 @@ impl Dashboard {
     fn news(&mut self, ui: &mut egui::Ui) {
         style::heading(
             ui,
-            "News",
-            "Rotating headlines with their source and age. Double-click opens the headline on screen.",
+            tr("News"),
+            tr("Rotating headlines with their source and age. Double-click opens the headline on screen."),
         );
         style::group(ui, |ui| self.action_settings(ui, Kind::News));
         ui.add_space(12.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Sources").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Sources")).size(16.0).strong());
             ui.colored_label(
                 style::MUTED,
-                "Feeds list the newest stories first, which is not always the outlet’s own ranking.",
+                tr("Feeds list the newest stories first, which is not always the outlet’s own ranking."),
             );
             let mut remove = None;
             let mut swap = None;
@@ -919,7 +1007,7 @@ impl Dashboard {
                         {
                             swap = Some(i);
                         }
-                        if ui.small_button("Remove").clicked() {
+                        if ui.small_button(tr("Remove")).clicked() {
                             remove = Some(i);
                         }
                     });
@@ -932,21 +1020,24 @@ impl Dashboard {
                 self.draft.news.feeds.remove(i);
             }
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("Add a source").strong());
+            ui.label(egui::RichText::new(tr("Add a source")).strong());
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.new_feed.name)
-                        .hint_text("Name")
+                        .hint_text(tr("Name"))
                         .desired_width(120.0),
                 );
                 ui.add(
                     egui::TextEdit::singleline(&mut self.new_feed.url)
-                        .hint_text("https://example.com/feed.xml (RSS or Atom)")
+                        .hint_text(tr("https://example.com/feed.xml (RSS or Atom)"))
                         .desired_width(new_url_width),
                 );
                 let valid = !self.new_feed.name.trim().is_empty()
                     && crate::click_action::web_url(&self.new_feed.url).is_ok();
-                if ui.add_enabled(valid, egui::Button::new("Add")).clicked() {
+                if ui
+                    .add_enabled(valid, egui::Button::new(tr("Add")))
+                    .clicked()
+                {
                     let mut feed = std::mem::take(&mut self.new_feed);
                     feed.name = feed.name.trim().to_owned();
                     feed.url = feed.url.trim().to_owned();
@@ -954,7 +1045,7 @@ impl Dashboard {
                     self.draft.news.feeds.push(feed);
                 }
             });
-            if ui.button("Add missing built-in sources").clicked() {
+            if ui.button(tr("Add missing built-in sources")).clicked() {
                 for preset in config::news_presets() {
                     if !self.draft.news.feeds.iter().any(|f| f.url == preset.url) {
                         self.draft.news.feeds.push(crate::config::FeedSource {
@@ -967,27 +1058,27 @@ impl Dashboard {
         });
         ui.add_space(12.0);
         style::group(ui, |ui| {
-            ui.label(egui::RichText::new("Rotation").size(16.0).strong());
+            ui.label(egui::RichText::new(tr("Rotation")).size(16.0).strong());
             let n = &mut self.draft.news;
             ui.horizontal(|ui| {
-                ui.label("Next headline every (seconds)");
+                ui.label(tr("Next headline every (seconds)"));
                 ui.add(egui::DragValue::new(&mut n.rotate_secs).range(3..=600));
             });
             ui.checkbox(
                 &mut n.pause_on_hover,
-                "Pause while the pointer is on the widget",
+                tr("Pause while the pointer is on the widget"),
             );
             ui.horizontal(|ui| {
-                ui.label("Refresh feeds (seconds)");
+                ui.label(tr("Refresh feeds (seconds)"));
                 ui.add(egui::DragValue::new(&mut n.refresh_secs).range(300..=86400));
             });
             ui.horizontal(|ui| {
-                ui.label("Skip headlines older than (hours)");
+                ui.label(tr("Skip headlines older than (hours)"));
                 ui.add(egui::DragValue::new(&mut n.max_age_hours).range(1..=720));
             });
             ui.colored_label(
                 style::MUTED,
-                "The same story from two sources is shown once. When feeds cannot be reached, the widget keeps the last headlines and marks them offline.",
+                tr("The same story from two sources is shown once. When feeds cannot be reached, the widget keeps the last headlines and marks them offline."),
             );
         });
     }
@@ -1010,6 +1101,7 @@ impl eframe::App for Dashboard {
             self.focus_action(action);
         }
         self.refresh();
+        crate::i18n::apply(self.cfg.lock().unwrap().language);
         if let Some(rx) = &self.test {
             match rx.try_recv() {
                 Ok(result) => {
@@ -1021,7 +1113,7 @@ impl eframe::App for Dashboard {
                             !test_settings_match(&tested, &self.draft, mail)
                         });
                     self.notice = Some(if stale {
-                        (false,"Settings changed during the test. Test again to check the current settings.".into())
+                        (false,tr("Settings changed during the test. Test again to check the current settings.").into())
                     } else {
                         match result {
                             Ok(s) => (true, s),
@@ -1032,7 +1124,7 @@ impl eframe::App for Dashboard {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.test = None;
                     self.test_configuration = None;
-                    self.notice = Some((false, "Connection check stopped. Try again.".into()));
+                    self.notice = Some((false, tr("Connection check stopped. Try again.").into()));
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
@@ -1057,34 +1149,34 @@ impl eframe::App for Dashboard {
                     if let Some((ok,message))=&self.notice{ui.colored_label(if *ok{style::MUTED}else{style::DANGER},message);ui.add_space(8.0);}
                     if self.page==Page::Studio {self.studio.ui(ui,&self.cfg);return;}
                     egui::ScrollArea::vertical().id_salt("dashboard-page").show(ui,|ui|{match self.page{
-                        Page::Widgets=>self.widgets(ui,false),Page::Usage=>self.widgets(ui,true),Page::Weather=>self.weather(ui),Page::Calendar=>self.connection(ui,false),Page::Mail=>self.connection(ui,true),Page::NowPlaying=>self.now_playing(ui),Page::Departures=>self.departures(ui),Page::News=>self.news(ui),
-                        Page::About=>{style::heading(ui,"BetterTaskbar","Your taskbar widgets, in one place.");style::group(ui,|ui|{ui.label("Usage providers and dashboard styling are adapted from Claude Code Usage Monitor by Code Zeno Pty Ltd.");ui.hyperlink_to("Claude Code Usage Monitor (MIT)","https://github.com/CodeZeno/Claude-Code-Usage-Monitor");ui.hyperlink_to("BetterTaskbar source and third-party notices","https://github.com/mrk1987/bettertaskbar");ui.label("Weather: MET Norway / Yr. Place search: Open-Meteo / GeoNames.");ui.label("Departures and stop search: Entur (NLOD). Road situations: Statens vegvesen DATEX II (NLOD).");ui.label("News headlines link to each outlet’s own site.");egui::CollapsingHeader::new("CodeZeno MIT license").show(ui,|ui|{ui.label(include_str!("../vendor/codezeno-usage-core/LICENSE"));ui.label(include_str!("../assets/lobe-icons.LICENSE"));});});},Page::Studio=>{}
+                        Page::General=>self.general(ui),Page::Widgets=>self.widgets(ui,false),Page::Usage=>self.widgets(ui,true),Page::Weather=>self.weather(ui),Page::Calendar=>self.connection(ui,false),Page::Mail=>self.connection(ui,true),Page::NowPlaying=>self.now_playing(ui),Page::Departures=>self.departures(ui),Page::News=>self.news(ui),
+                        Page::About=>{style::heading(ui,"BetterTaskbar",tr("Your taskbar widgets, in one place."));style::group(ui,|ui|{ui.label(tr("Usage providers and dashboard styling are adapted from Claude Code Usage Monitor by Code Zeno Pty Ltd."));ui.hyperlink_to("Claude Code Usage Monitor (MIT)","https://github.com/CodeZeno/Claude-Code-Usage-Monitor");ui.hyperlink_to(tr("BetterTaskbar source and third-party notices"),"https://github.com/mrk1987/bettertaskbar");ui.label(tr("Weather: MET Norway / Yr. Place search: Open-Meteo / GeoNames."));ui.label(tr("Departures and stop search: Entur (NLOD). Road situations: Statens vegvesen DATEX II (NLOD)."));ui.label(tr("News headlines link to each outlet’s own site."));egui::CollapsingHeader::new(tr("CodeZeno MIT license")).show(ui,|ui|{ui.label(include_str!("../vendor/codezeno-usage-core/LICENSE"));ui.label(include_str!("../assets/lobe-icons.LICENSE"));});});},Page::Studio=>{}
                     }
-                    if self.page.has_settings(){ui.add_space(16.0);ui.horizontal(|ui|{if ui.add(egui::Button::new("Save changes").fill(style::ACCENT)).clicked(){self.save(false);}
-if ui.button("Discard edits").clicked(){self.discard_page();}});}
+                    if self.page.has_settings(){ui.add_space(16.0);ui.horizontal(|ui|{if ui.add(egui::Button::new(tr("Save changes")).fill(style::ACCENT)).clicked(){self.save(false);}
+if ui.button(tr("Discard edits")).clicked(){self.discard_page();}});}
                     });
                 });
             });
         });
         });
         if self.close_prompt {
-            egui::Window::new("Unsaved changes")
+            egui::Window::new(tr("Unsaved changes"))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .collapsible(false)
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
-                    ui.label("Save your settings and theme before closing?");
+                    ui.label(tr("Save your settings and theme before closing?"));
                     ui.horizontal(|ui| {
-                        if ui.button("Keep editing").clicked() {
+                        if ui.button(tr("Keep editing")).clicked() {
                             self.close_prompt = false;
                         }
-                        if ui.button("Discard and close").clicked() {
+                        if ui.button(tr("Discard and close")).clicked() {
                             self.base = self.draft.clone();
                             self.studio.discard();
                             self.close_prompt = false;
                             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                         }
-                        if ui.button("Save and close").clicked()
+                        if ui.button(tr("Save and close")).clicked()
                             && self.save(true)
                             && self.studio.save(&self.cfg)
                         {
@@ -1177,18 +1269,18 @@ pub fn run(page: Page) {
 
 fn description(kind: Kind) -> &'static str {
     match kind {
-        Kind::Weather => "Forecast, temperatures and precipitation",
-        Kind::Calendar => "What is on now and what comes next",
-        Kind::Mail => "Unread count and rotating message subjects",
-        Kind::NowPlaying => "Track, artist and playback state from Windows media",
-        Kind::Departures => "Next bus, tram, metro, train or boat, with a traffic level",
-        Kind::News => "Rotating headlines from news feeds you choose",
-        Kind::Usage(_) => "Usage limits and reset times",
+        Kind::Weather => tr("Forecast, temperatures and precipitation"),
+        Kind::Calendar => tr("What is on now and what comes next"),
+        Kind::Mail => tr("Unread count and rotating message subjects"),
+        Kind::NowPlaying => tr("Track, artist and playback state from Windows media"),
+        Kind::Departures => tr("Next bus, tram, metro, train or boat, with a traffic level"),
+        Kind::News => tr("Rotating headlines from news feeds you choose"),
+        Kind::Usage(_) => tr("Usage limits and reset times"),
     }
 }
 fn setup(p: codezeno_usage_core::providers::ProviderId) -> &'static str {
     use codezeno_usage_core::providers::ProviderId::*;
-    match p{Claude=>"Sign in with Claude Code or the Claude desktop app.",Codex=>"Sign in with the Codex CLI or desktop app.",Antigravity=>"Sign in with the Antigravity CLI.",OpenCode=>"Use OPENCODE_GO_WORKSPACE_ID and OPENCODE_GO_AUTH_COOKIE, or OpenCode Go’s config.json.",Cursor=>"Sign in with Cursor. Its local session is detected automatically.",Grok=>"Run grok login to sign in with your xAI account.",Copilot=>"Sign in with the Copilot CLI or GitHub CLI (gh auth login)."}
+    match p{Claude=>tr("Sign in with Claude Code or the Claude desktop app."),Codex=>tr("Sign in with the Codex CLI or desktop app."),Antigravity=>tr("Sign in with the Antigravity CLI."),OpenCode=>tr("Use OPENCODE_GO_WORKSPACE_ID and OPENCODE_GO_AUTH_COOKIE, or OpenCode Go’s config.json."),Cursor=>tr("Sign in with Cursor. Its local session is detected automatically."),Grok=>tr("Run grok login to sign in with your xAI account."),Copilot=>tr("Sign in with the Copilot CLI or GitHub CLI (gh auth login).")}
 }
 fn validate(c: &Config) -> Result<(), String> {
     for kind in Kind::ALL {
@@ -1199,11 +1291,11 @@ fn validate(c: &Config) -> Result<(), String> {
     }
     for host in [&c.calendar.host, &c.mail.host] {
         if host.trim().is_empty() || host.contains(['\r', '\n', '/', '\\']) {
-            return Err("Enter a server hostname or IP address, without a URL or path.".into());
+            return Err(tr("Enter a server hostname or IP address, without a URL or path.").into());
         }
     }
     if c.calendar.port == 0 || c.mail.port == 0 {
-        return Err("Server ports must be between 1 and 65535.".into());
+        return Err(tr("Server ports must be between 1 and 65535.").into());
     }
     if [
         &c.calendar.username,
@@ -1214,37 +1306,41 @@ fn validate(c: &Config) -> Result<(), String> {
     .iter()
     .any(|s| s.contains(['\r', '\n']))
     {
-        return Err("Usernames and passwords cannot contain line breaks.".into());
+        return Err(tr("Usernames and passwords cannot contain line breaks.").into());
     }
     if !["starttls", "tls", "plain", "none"]
         .contains(&c.mail.security.to_ascii_lowercase().as_str())
     {
-        return Err("Choose STARTTLS, TLS or plain for the mail connection.".into());
+        return Err(tr("Choose STARTTLS, TLS or plain for the mail connection.").into());
     }
     if !(1800..=86400).contains(&c.weather.refresh_secs)
         || !(30..=86400).contains(&c.calendar.refresh_secs)
         || !(30..=86400).contains(&c.mail.refresh_secs)
         || !(1..=3600).contains(&c.mail.rotate_secs)
     {
-        return Err("Choose a weather refresh from 1800–86400 seconds, mail/calendar refresh from 30–86400 seconds, and subject rotation from 1–3600 seconds.".into());
+        return Err(tr("Choose a weather refresh from 1800–86400 seconds, mail/calendar refresh from 30–86400 seconds, and subject rotation from 1–3600 seconds.").into());
     }
     if !(30..=3600).contains(&c.departures.refresh_secs)
         || !(50..=2000).contains(&c.departures.traffic_radius_m)
     {
-        return Err("Choose a departure refresh from 30–3600 seconds and a traffic radius from 50–2000 metres.".into());
+        return Err(tr("Choose a departure refresh from 30–3600 seconds and a traffic radius from 50–2000 metres.").into());
     }
     if !(300..=86400).contains(&c.news.refresh_secs)
         || !(3..=600).contains(&c.news.rotate_secs)
         || !(1..=720).contains(&c.news.max_age_hours)
     {
-        return Err("Choose a news refresh from 300–86400 seconds, rotation from 3–600 seconds and a maximum age from 1–720 hours.".into());
+        return Err(tr("Choose a news refresh from 300–86400 seconds, rotation from 3–600 seconds and a maximum age from 1–720 hours.").into());
     }
     for feed in &c.news.feeds {
         if feed.name.trim().is_empty() || feed.name.contains(['\r', '\n']) {
-            return Err("Give every news source a name on one line.".into());
+            return Err(tr("Give every news source a name on one line.").into());
         }
-        crate::click_action::web_url(&feed.url)
-            .map_err(|e| format!("News source “{}”: {e}", feed.name))?;
+        crate::click_action::web_url(&feed.url).map_err(|e| {
+            trf(
+                "News source “{name}”: {error}",
+                &[("name", &feed.name), ("error", &e)],
+            )
+        })?;
     }
     if let Some(place) = &c.weather.place {
         if !place.lat.is_finite()
@@ -1252,7 +1348,7 @@ fn validate(c: &Config) -> Result<(), String> {
             || !(-90.0..=90.0).contains(&place.lat)
             || !(-180.0..=180.0).contains(&place.lon)
         {
-            return Err("Enter valid latitude and longitude coordinates.".into());
+            return Err(tr("Enter valid latitude and longitude coordinates.").into());
         }
     }
     Ok(())

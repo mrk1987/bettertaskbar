@@ -7,6 +7,7 @@ pub mod now_playing;
 pub mod usage;
 pub mod weather;
 
+use crate::i18n::tr;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
@@ -32,7 +33,7 @@ pub trait Widget {
     }
     /// Open what the pill shows right now (the "Open current item" action).
     fn open_current(&mut self) -> Result<(), String> {
-        Err("This widget has no current item to open.".into())
+        Err(tr("This widget has no current item to open.").into())
     }
 }
 

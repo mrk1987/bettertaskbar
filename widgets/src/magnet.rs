@@ -1,4 +1,5 @@
 //! One hub owns docked positions, so independent widget timers cannot fight.
+use crate::i18n::tr;
 use crate::{
     app::Kind,
     config::{self, DockSide, Placement, SharedConfig},
@@ -224,7 +225,7 @@ pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
                 {
                     status
                         .problems
-                        .insert(kind.key().into(), "Reading taskbar layout…".into());
+                        .insert(kind.key().into(), tr("Reading taskbar layout…").into());
                 }
             }
             continue;
@@ -328,7 +329,7 @@ pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
                 }
                 None => {
                     shell::set_visible(hwnd, false);
-                    status.problems.insert(kind.key().into(),"Not enough free taskbar space. Move this widget, reduce its theme size, or unmagnetise.".into());
+                    status.problems.insert(kind.key().into(),tr("Not enough free taskbar space. Move this widget, make its theme smaller, or switch off magnetic placement under General.").into());
                 }
             }
         }

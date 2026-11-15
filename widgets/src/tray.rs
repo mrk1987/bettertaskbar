@@ -1,5 +1,6 @@
 //! Minimal tray icon + popup menu on a dedicated message-loop thread.
 
+use crate::i18n::tr;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -37,7 +38,7 @@ fn state(hwnd: HWND) -> &'static TrayState {
 }
 
 /// The placement every enabled widget shares, if they all share one.
-fn common_placement(c: &crate::config::Config) -> Option<Placement> {
+pub(crate) fn common_placement(c: &crate::config::Config) -> Option<Placement> {
     let mut enabled = Kind::ALL
         .into_iter()
         .map(|k| k.state(c))
@@ -88,6 +89,7 @@ fn show_menu(hwnd: HWND) {
     let st = state(hwnd);
     crate::config::refresh(&st.cfg);
     let cfg = st.cfg.lock().unwrap().clone();
+    crate::i18n::apply(cfg.language);
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
         let Ok(usage) = CreatePopupMenu() else {
@@ -107,7 +109,7 @@ fn show_menu(hwnd: HWND) {
                 MF_STRING
             }
         };
-        add(menu, MF_STRING, ID_DASHBOARD, "Dashboard…");
+        add(menu, MF_STRING, ID_DASHBOARD, tr("Dashboard…"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         for kind in Kind::ALL {
             let state = kind.state(&cfg);
@@ -118,7 +120,7 @@ fn show_menu(hwnd: HWND) {
                 _ => add(menu, on, id, kind.label()),
             }
         }
-        labels.push(wide("AI usage"));
+        labels.push(wide(tr("AI usage")));
         let _ = AppendMenuW(
             menu,
             MF_POPUP,
@@ -139,11 +141,11 @@ fn show_menu(hwnd: HWND) {
                 let _ = CheckMenuRadioItem(menu, id as u32, id as u32, id as u32, MF_BYCOMMAND.0);
             }
         };
-        placement(ID_PIN_ALL, Placement::Taskbar, "Pin all to taskbar");
-        placement(ID_DESKTOP_ALL, Placement::Desktop, "Pin all to desktop");
-        placement(ID_DETACH_ALL, Placement::Floating, "Float all on top");
+        placement(ID_PIN_ALL, Placement::Taskbar, tr("Pin all to taskbar"));
+        placement(ID_DESKTOP_ALL, Placement::Desktop, tr("Pin all to desktop"));
+        placement(ID_DETACH_ALL, Placement::Floating, tr("Float all on top"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        labels.push(wide("Quit"));
+        labels.push(wide(tr("Quit")));
         let _ = AppendMenuW(
             menu,
             MF_STRING,

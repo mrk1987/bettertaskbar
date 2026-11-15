@@ -1,5 +1,6 @@
 //! Yr.no weather pill: symbol icon + high/low + precipitation.
 
+use crate::i18n::{tr, trf};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -105,18 +106,27 @@ fn find_onset(series: &[Value], now: chrono::DateTime<chrono::Utc>) -> Option<On
 fn rain_line(d: &WeatherData, now: chrono::DateTime<chrono::Utc>) -> String {
     match d.onset(now) {
         Some(o) => onset_hint(o, now),
-        None => format!("Dry {ONSET_WINDOW_HOURS}h"),
+        None => trf("Dry {hours}h", &[("hours", &ONSET_WINDOW_HOURS)]),
     }
 }
 
 pub fn onset_hint(onset: &Onset, now: chrono::DateTime<chrono::Utc>) -> String {
     let mins = (onset.at - now).num_minutes();
+    // `kind` stays English in the data; it is translated only for display.
+    let kind = match onset.kind {
+        "Snow" => tr("Snow"),
+        "Sleet" => tr("Sleet"),
+        _ => tr("Rain"),
+    };
     if mins <= 0 {
-        format!("{} now", onset.kind)
+        trf("{kind} now", &[("kind", &kind)])
     } else if mins < 60 {
-        format!("{} {mins}m", onset.kind)
+        trf("{kind} {minutes}m", &[("kind", &kind), ("minutes", &mins)])
     } else {
-        format!("{} {}h", onset.kind, (mins + 30) / 60)
+        trf(
+            "{kind} {hours}h",
+            &[("kind", &kind), ("hours", &((mins + 30) / 60))],
+        )
     }
 }
 
@@ -217,6 +227,11 @@ fn fetch(place: &Place) -> Option<WeatherData> {
     })
 }
 
+/// The Yr symbol Theme Studio previews with: partly cloudy, day.
+pub(crate) fn preview_symbol() -> String {
+    symbol_svg("partlycloudy_day")
+}
+
 /// URL of Yr's icon for a met.no `symbol_code` such as `clearsky_night`,
 /// `lightrainshowers_day` or `fog`. Yr numbers its icons, and the ones that
 /// show the sun or moon come in day (`d`), night (`n`) and polar twilight (`m`)
@@ -288,11 +303,11 @@ pub fn search_places(query: &str) -> Result<Vec<Place>, String> {
         .query("language", "en")
         .header("User-Agent", USER_AGENT)
         .call()
-        .map_err(|e| format!("Place search failed: {e}"))?;
+        .map_err(|e| trf("Place search failed: {error}", &[("error", &e)]))?;
     let json: Value = response
         .body_mut()
         .read_json()
-        .map_err(|e| format!("Cannot read search results: {e}"))?;
+        .map_err(|e| trf("Cannot read search results: {error}", &[("error", &e)]))?;
     parse_places(&json)
 }
 
@@ -303,7 +318,7 @@ fn parse_places(json: &Value) -> Result<Vec<Place>, String> {
     };
     let locations = results
         .as_array()
-        .ok_or("Search returned an unexpected reply")?;
+        .ok_or(tr("Search returned an unexpected reply"))?;
     Ok(locations
         .iter()
         .filter_map(|loc| {
@@ -348,7 +363,7 @@ impl Widget for WeatherWidget {
         if let Some(d) = &self.latest {
             for (key, value) in [
                 ("primary", format!("{:.0}° / {:.0}°", d.hi, d.lo)),
-                ("secondary", format!("{:.0} mm", d.precip)),
+                ("secondary", rain_line(d, chrono::Utc::now())),
                 ("high", format!("{:.0}", d.hi)),
                 ("low", format!("{:.0}", d.lo)),
                 ("precip", d.precip.to_string()),
@@ -358,7 +373,7 @@ impl Widget for WeatherWidget {
                 values.insert(key.into(), value);
             }
         } else {
-            values.insert("primary".into(), "Loading weather…".into());
+            values.insert("primary".into(), tr("Loading weather…").into());
         }
         values
     }
@@ -408,7 +423,7 @@ impl Widget for WeatherWidget {
                     }
                     None => {
                         ui.label(egui::RichText::new("…").weak().size(12.0));
-                        ui.label(egui::RichText::new("weather").weak().size(11.0));
+                        ui.label(egui::RichText::new(tr("weather")).weak().size(11.0));
                     }
                 }
             });

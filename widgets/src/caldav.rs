@@ -7,6 +7,7 @@
 //! `/caldav/`, the home is `/caldav/calendars/` and each calendar is
 //! `/caldav/calendars/<id>`; none of that is assumed here.
 
+use crate::i18n::trf;
 use base64::Engine;
 use chrono::{DateTime, Duration, Local, Utc};
 
@@ -68,8 +69,18 @@ fn lines(events: &[Event], now: DateTime<Local>) -> Lines {
         .min_by_key(|e| e.end);
     let next = events.iter().find(|e| e.start > now);
     Lines {
-        now: current.map(|e| format!("Now: {} · to {}", e.summary, e.end.format("%H:%M"))),
-        next: next.map(|e| format!("Next: {} · {}", e.summary, when(e.start, now))),
+        now: current.map(|e| {
+            trf(
+                "Now: {event} · to {time}",
+                &[("event", &e.summary), ("time", &e.end.format("%H:%M"))],
+            )
+        }),
+        next: next.map(|e| {
+            trf(
+                "Next: {event} · {when}",
+                &[("event", &e.summary), ("when", &when(e.start, now))],
+            )
+        }),
     }
 }
 
@@ -77,11 +88,18 @@ fn lines(events: &[Event], now: DateTime<Local>) -> Lines {
 /// added when the event is on another day.
 fn when(start: DateTime<Local>, now: DateTime<Local>) -> String {
     let days = (start.date_naive() - now.date_naive()).num_days();
-    match days {
-        0 => start.format("%H:%M").to_string(),
-        1..=6 => start.format("%a %H:%M").to_string(),
-        _ => start.format("%-d %b %H:%M").to_string(),
-    }
+    // Day and month names come from chrono's locale data: `ma.`, `nov.`.
+    let (locale, date) = if crate::i18n::norwegian() {
+        (chrono::Locale::nb_NO, "%-d. %b %H:%M")
+    } else {
+        (chrono::Locale::en_US, "%-d %b %H:%M")
+    };
+    let format = match days {
+        0 => "%H:%M",
+        1..=6 => "%a %H:%M",
+        _ => date,
+    };
+    start.format_localized(format, locale).to_string()
 }
 
 struct Client<'a> {
@@ -345,6 +363,21 @@ fn parse_calendar_data(xml: &str) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn event_times_follow_the_language() {
+        // 15 November 2026 is a Sunday.
+        let now = Local.with_ymd_and_hms(2026, 11, 15, 9, 0, 0).unwrap();
+        let today = Local.with_ymd_and_hms(2026, 11, 15, 16, 0, 0).unwrap();
+        let monday = Local.with_ymd_and_hms(2026, 11, 16, 14, 30, 0).unwrap();
+        let later = Local.with_ymd_and_hms(2026, 12, 3, 9, 5, 0).unwrap();
+        assert_eq!(when(today, now), "16:00");
+        assert_eq!(when(monday, now), "Mon 14:30");
+        assert_eq!(when(later, now), "3 Dec 09:05");
+        crate::i18n::apply(crate::i18n::Language::Norwegian);
+        assert_eq!(when(monday, now), "ma. 14:30");
+        assert_eq!(when(later, now), "3. des. 09:05");
+    }
 
     #[test]
     fn calendar_urls_never_forward_credentials_to_another_origin() {

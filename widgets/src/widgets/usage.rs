@@ -1,4 +1,5 @@
 use super::Widget;
+use crate::i18n::{tr, trf};
 use crate::{config::SharedConfig, icons::IconCache, theme::Values};
 use codezeno_usage_core::{models::UsageData, providers::ProviderId};
 use eframe::egui;
@@ -21,7 +22,7 @@ pub fn status(provider: ProviderId) -> String {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Snapshot>(&bytes).ok())
     else {
-        return "Waiting for the first usage reading…".into();
+        return tr("Waiting for the first usage reading…").into();
     };
     if let Some(error) = snapshot.error {
         return error;
@@ -32,26 +33,29 @@ pub fn status(provider: ProviderId) -> String {
         .as_secs()
         .saturating_sub(snapshot.updated);
     if age > 300 {
-        return "Last reading is stale. Waiting for a refresh…".into();
+        return tr("Last reading is stale. Waiting for a refresh…").into();
     }
     snapshot
         .data
         .map(|d| {
-            format!(
-                "Connected · {}{}",
-                if d.session.available {
-                    format!("Session {:.0}%", d.session.percentage)
-                } else {
-                    String::new()
-                },
-                if d.weekly.available {
-                    format!(" · Long window {:.0}%", d.weekly.percentage)
-                } else {
-                    String::new()
-                }
-            )
+            let mut text = tr("Connected").to_string();
+            if d.session.available {
+                text += " · ";
+                text += &trf(
+                    "Session {percent}%",
+                    &[("percent", &format!("{:.0}", d.session.percentage))],
+                );
+            }
+            if d.weekly.available {
+                text += " · ";
+                text += &trf(
+                    "Long window {percent}%",
+                    &[("percent", &format!("{:.0}", d.weekly.percentage))],
+                );
+            }
+            text
         })
-        .unwrap_or_else(|| "No usage reading yet".into())
+        .unwrap_or_else(|| tr("No usage reading yet").into())
 }
 fn publish(provider: ProviderId, result: &Result<UsageData, String>) {
     let snapshot = Snapshot {
@@ -153,7 +157,7 @@ impl UsageWidget {
             refresh,
             rx,
             data: None,
-            notice: Some("Loading usage…".into()),
+            notice: Some(tr("Loading usage…").into()),
             text_width: None,
         }
     }
@@ -164,11 +168,11 @@ impl UsageWidget {
         let labels = (
             label(
                 self.data.as_ref().and_then(|d| d.session_label.as_ref()),
-                "Session",
+                tr("Session"),
             ),
             label(
                 self.data.as_ref().and_then(|d| d.weekly_label.as_ref()),
-                "Weekly",
+                tr("Weekly"),
             ),
         );
         if let Some((cached, width)) = &self.text_width {
@@ -208,12 +212,12 @@ impl UsageWidget {
         match (&self.data, &self.notice) {
             (Some(data), notice) => (
                 section(
-                    data.session_label.as_deref().unwrap_or("Session"),
+                    data.session_label.as_deref().unwrap_or(tr("Session")),
                     &data.session,
                 ),
                 notice.clone().unwrap_or_else(|| {
                     section(
-                        data.weekly_label.as_deref().unwrap_or("Weekly"),
+                        data.weekly_label.as_deref().unwrap_or(tr("Weekly")),
                         &data.weekly,
                     )
                 }),
@@ -234,7 +238,7 @@ impl Widget for UsageWidget {
     fn refresh(&mut self) {
         self.refresh
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        self.notice = Some("Refreshing…".into());
+        self.notice = Some(tr("Refreshing…").into());
     }
     fn tick(&mut self) {
         while let Ok(result) = self.rx.try_recv() {
@@ -273,11 +277,7 @@ impl Widget for UsageWidget {
             {
                 values.insert(
                     "reset".into(),
-                    format!(
-                        "{}h {}m",
-                        reset.as_secs() / 3600,
-                        (reset.as_secs() / 60) % 60
-                    ),
+                    hours_minutes(reset.as_secs() / 3600, (reset.as_secs() / 60) % 60),
                 );
             }
         }
@@ -310,18 +310,35 @@ impl Widget for UsageWidget {
 /// until the window resets.
 fn section_text(name: &str, available: bool, percentage: f64, remaining: Option<u64>) -> String {
     if !available {
-        return format!("{name}: unavailable");
+        return unavailable(name);
     }
     let reset = remaining
         .map(|s| {
             if s >= 86400 {
-                format!(" · {}d {}h", s / 86400, (s / 3600) % 24)
+                format!(" · {}", days_hours(s / 86400, (s / 3600) % 24))
             } else {
-                format!(" · {}h {}m", s / 3600, (s / 60) % 60)
+                format!(" · {}", hours_minutes(s / 3600, (s / 60) % 60))
             }
         })
         .unwrap_or_default();
     format!("{name}: {percentage:.0}%{reset}")
+}
+
+fn unavailable(name: &str) -> String {
+    trf("{name}: unavailable", &[("name", &name)])
+}
+
+/// "3d 4h": time until a long window resets.
+fn days_hours(days: impl std::fmt::Display, hours: impl std::fmt::Display) -> String {
+    trf("{days}d {hours}h", &[("days", &days), ("hours", &hours)])
+}
+
+/// "2h 15m": time until a window resets.
+fn hours_minutes(hours: impl std::fmt::Display, minutes: impl std::fmt::Display) -> String {
+    trf(
+        "{hours}h {minutes}m",
+        &[("hours", &hours), ("minutes", &minutes)],
+    )
 }
 
 /// The widest any `section_text` line for `name` can be, so the pill keeps
@@ -329,14 +346,14 @@ fn section_text(name: &str, available: bool, percentage: f64, remaining: Option<
 /// (percent to 199, two-digit days, hours and minutes), tried with each
 /// digit in case the font's digits differ in width.
 fn widest(name: &str, measure: impl Fn(&str) -> f32) -> f32 {
-    let mut lines = vec![format!("{name}: unavailable")];
+    let mut lines = vec![unavailable(name)];
     for d in '0'..='9' {
         let dd = format!("{d}{d}");
         for pct in [format!("1{dd}"), dd.clone()] {
             for reset in [
                 String::new(),
-                format!(" · {dd}d {dd}h"),
-                format!(" · {dd}h {dd}m"),
+                format!(" · {}", days_hours(&dd, &dd)),
+                format!(" · {}", hours_minutes(&dd, &dd)),
             ] {
                 lines.push(format!("{name}: {pct}%{reset}"));
             }

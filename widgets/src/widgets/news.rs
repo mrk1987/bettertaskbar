@@ -5,6 +5,7 @@
 //! hover is on) and for a moment after any press, so the second click of a
 //! double-click always opens the story the first click landed on.
 
+use crate::i18n::{tr, trf};
 use std::collections::HashSet;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -255,7 +256,7 @@ fn fetch_source(source: &FeedSource) -> Result<Vec<Headline>, String> {
 pub fn fetch(cfg: &NewsCfg) -> Result<Headlines, String> {
     let sources: Vec<&FeedSource> = cfg.feeds.iter().filter(|f| f.enabled).collect();
     if sources.is_empty() {
-        return Err("No news sources are switched on".into());
+        return Err(tr("No news sources are switched on").into());
     }
     // Feeds are fetched side by side: one slow outlet must not hold up the rest.
     let results: Vec<(String, Result<Vec<Headline>, String>)> = std::thread::scope(|scope| {
@@ -308,10 +309,10 @@ pub fn age(published: Option<DateTime<Utc>>, now: DateTime<Utc>) -> String {
     };
     let mins = (now - p).num_minutes().max(0);
     match mins {
-        0 => "now".into(),
-        1..=59 => format!("{mins} min"),
-        60..=2879 => format!("{} h", mins / 60),
-        _ => format!("{} d", mins / 1440),
+        0 => tr("now").into(),
+        1..=59 => trf("{minutes} min", &[("minutes", &mins)]),
+        60..=2879 => trf("{hours} h", &[("hours", &(mins / 60))]),
+        _ => trf("{days} d", &[("days", &(mins / 1440))]),
     }
 }
 
@@ -365,7 +366,7 @@ impl NewsWidget {
             headlines: None,
             pending: None,
             offline: false,
-            notice: Some("Loading…".into()),
+            notice: Some(tr("Loading…").into()),
             index: 0,
             last_rotate: Instant::now(),
             shown: true,
@@ -396,7 +397,7 @@ impl NewsWidget {
             parts.push(age);
         }
         if self.stale() {
-            parts.push("offline".into());
+            parts.push(tr("offline").into());
         }
         parts.join(" · ")
     }
@@ -412,35 +413,6 @@ fn may_rotate(
     !(hovered && pause_on_hover) && held_until.is_none_or(|t| now >= t)
 }
 
-fn news_tile(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 6.0, egui::Color32::from_rgb(0x2F, 0x6F, 0xD6));
-    let white = egui::Color32::WHITE;
-    let page = egui::Rect::from_center_size(rect.center(), egui::vec2(15.0, 13.0));
-    p.rect_stroke(
-        page,
-        1.5,
-        egui::Stroke::new(1.4, white),
-        egui::StrokeKind::Middle,
-    );
-    // A headline block and three lines of text.
-    p.rect_filled(
-        egui::Rect::from_min_size(page.min + egui::vec2(2.5, 2.5), egui::vec2(4.5, 3.5)),
-        0.5,
-        white,
-    );
-    for (y, x0) in [(3.2, 8.5), (6.3, 2.5), (9.4, 2.5)] {
-        p.line_segment(
-            [
-                egui::pos2(page.left() + x0, page.top() + y),
-                egui::pos2(page.right() - 2.5, page.top() + y),
-            ],
-            egui::Stroke::new(1.1, white),
-        );
-    }
-}
-
 impl Widget for NewsWidget {
     fn size(&self) -> (f32, f32) {
         (260.0, 48.0)
@@ -448,7 +420,7 @@ impl Widget for NewsWidget {
 
     fn refresh(&mut self) {
         self.refresh.request();
-        self.notice = Some("Refresh requested…".into());
+        self.notice = Some(tr("Refresh requested…").into());
     }
 
     fn interaction(&mut self, hovered: bool, pressed: bool) {
@@ -462,7 +434,7 @@ impl Widget for NewsWidget {
         let link = self
             .current()
             .map(|h| h.link.clone())
-            .ok_or("No headline to open yet.")?;
+            .ok_or(tr("No headline to open yet."))?;
         // Hold the story that was opened while the browser comes up.
         self.held_until = Some(Instant::now() + HOLD_AFTER_PRESS);
         crate::shell::try_open_url(&crate::click_action::web_url(&link)?)
@@ -477,13 +449,14 @@ impl Widget for NewsWidget {
                 age(h.published, Utc::now()),
             ),
             None => (
-                "News".into(),
+                tr("News").into(),
                 self.notice.clone().unwrap_or_default(),
                 String::new(),
                 String::new(),
             ),
         };
         [
+            ("icon".into(), crate::builtin_icons::Icon::News.key().into()),
             ("primary".into(), primary),
             ("secondary".into(), secondary),
             ("source".into(), source),
@@ -516,7 +489,7 @@ impl Widget for NewsWidget {
                 Update::Unconfigured => {
                     self.headlines = None;
                     self.pending = None;
-                    self.notice = Some("Switch on a news source in settings".into());
+                    self.notice = Some(tr("Switch on a news source in settings").into());
                 }
             }
         }
@@ -550,12 +523,14 @@ impl Widget for NewsWidget {
     fn ui(&mut self, ui: &mut egui::Ui, _icons: &mut IconCache) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
-            news_tile(ui);
+            crate::builtin_icons::tile(ui, crate::builtin_icons::Icon::News);
             let (first, second) = match self.current() {
                 Some(h) => (h.title.clone(), self.second_line(h)),
                 None => (
-                    "News".into(),
-                    self.notice.clone().unwrap_or_else(|| "No headlines".into()),
+                    tr("News").into(),
+                    self.notice
+                        .clone()
+                        .unwrap_or_else(|| tr("No headlines").into()),
                 ),
             };
             self.shown = two_lines(ui, &first, &second, 200.0);

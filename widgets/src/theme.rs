@@ -1,4 +1,5 @@
 //! Per-widget visual documents. Bindings substitute data; they never execute code.
+use crate::i18n::{tr, trf};
 use eframe::egui::{self, Color32, Rect, Vec2};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -34,10 +35,10 @@ impl Element {
     pub fn new(kind: ElementKind) -> Self {
         Self {
             name: match kind {
-                ElementKind::Text => "Text",
-                ElementKind::Rectangle => "Rectangle",
-                ElementKind::Progress => "Progress",
-                ElementKind::Icon => "Icon",
+                ElementKind::Text => tr("Text"),
+                ElementKind::Rectangle => tr("Rectangle"),
+                ElementKind::Progress => tr("Progress"),
+                ElementKind::Icon => tr("Icon"),
             }
             .into(),
             kind,
@@ -72,13 +73,13 @@ impl Theme {
         primary.width = 176.0;
         primary.height = 16.0;
         let mut secondary = primary.clone();
-        secondary.name = "Secondary line".into();
+        secondary.name = tr("Secondary line").into();
         secondary.y = 25.0;
         secondary.text = "{secondary}".into();
         secondary.font_size = 11.0;
         secondary.color = [165, 167, 175, 255];
         let mut icon = Element::new(ElementKind::Icon);
-        icon.name = "Widget icon".into();
+        icon.name = tr("Widget icon").into();
         icon.x = 10.0;
         icon.y = 11.0;
         icon.width = 26.0;
@@ -96,17 +97,17 @@ impl Theme {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.version != 1 {
-            return Err("Unsupported theme version".into());
+            return Err(tr("Unsupported theme version").into());
         }
         if !self.width.is_finite()
             || !self.height.is_finite()
             || !(48.0..=1600.0).contains(&self.width)
             || !(24.0..=256.0).contains(&self.height)
         {
-            return Err("Canvas must be 48–1600 px wide and 24–256 px tall".into());
+            return Err(tr("Canvas must be 48–1600 px wide and 24–256 px tall").into());
         }
         if self.elements.len() > 64 {
-            return Err("A theme can contain at most 64 layers".into());
+            return Err(tr("A theme can contain at most 64 layers").into());
         }
         for e in &self.elements {
             if [e.x, e.y, e.width, e.height, e.font_size, e.radius]
@@ -124,9 +125,9 @@ impl Theme {
                 || e.name.len() > 128
                 || e.binding.len() > 64
             {
-                return Err(format!(
-                    "Layer '{}' is outside the canvas or has invalid properties",
-                    e.name
+                return Err(trf(
+                    "Layer “{name}” is outside the canvas or has invalid properties",
+                    &[("name", &e.name)],
                 ));
             }
         }
@@ -185,6 +186,8 @@ impl Theme {
                     if let Some(provider) = crate::provider_icons::from_key(value) {
                         let clipped = ui.new_child(egui::UiBuilder::new().max_rect(rect));
                         crate::provider_icons::paint(&clipped, rect, provider);
+                    } else if let Some(icon) = crate::builtin_icons::from_key(value) {
+                        crate::builtin_icons::paint(&p, rect, icon);
                     } else if value.starts_with("https://www.yr.no/assets/images/weather-symbols/")
                     {
                         if let Some(texture) = icons.get(ui.ctx(), value, 64) {
@@ -235,13 +238,16 @@ pub fn substitute(template: &str, values: &Values) -> String {
 pub fn sample(kind: crate::app::Kind) -> Values {
     use crate::app::Kind;
     let (primary, secondary) = match kind {
-        Kind::Weather => ("8° / 2°", "3 mm"),
-        Kind::Calendar => ("Now: Project review", "Next: Team meeting · 14:30"),
-        Kind::Mail => ("Design review notes", "5 unread"),
+        Kind::Weather => ("8° / 2°", tr("Rain 40m")),
+        Kind::Calendar => (tr("Now: Project review"), tr("Next: Team meeting · 14:30")),
+        Kind::Mail => (tr("Design review notes"), tr("5 unread")),
         Kind::NowPlaying => ("Running Up That Hill", "Kate Bush"),
-        Kind::Departures => ("Bus 31 · 6 min", "Traffic: High"),
-        Kind::News => ("Storting agrees on next year's budget", "NRK · 12 min"),
-        _ => ("Session: 34% used · 2h 15m", "Weekly: 62% used · 3d 4h"),
+        Kind::Departures => ("31 · 6 min", tr("Traffic: High")),
+        Kind::News => (tr("Storting agrees on next year's budget"), "NRK · 12 min"),
+        _ => (
+            tr("Session: 34% used · 2h 15m"),
+            tr("Weekly: 62% used · 3d 4h"),
+        ),
     };
     let mut values: Values = [
         ("primary", primary),
@@ -257,13 +263,13 @@ pub fn sample(kind: crate::app::Kind) -> Values {
             ("high", "8"),
             ("low", "2"),
             ("precip", "3"),
-            ("rain_hint", "Rain 40m"),
+            ("rain_hint", tr("Rain 40m")),
         ],
         Kind::Mail => &[("count", "5")],
-        Kind::NowPlaying => &[("state", "Playing"), ("artist", "Kate Bush")],
+        Kind::NowPlaying => &[("state", tr("Playing")), ("artist", "Kate Bush")],
         Kind::Departures => &[
-            ("traffic", "High"),
-            ("mode", "Bus"),
+            ("traffic", tr("High")),
+            ("mode", tr("Bus")),
             ("line", "31"),
             ("minutes", "6"),
             ("destination", "Tonsenhagen"),
@@ -273,12 +279,17 @@ pub fn sample(kind: crate::app::Kind) -> Values {
         _ => &[],
     };
     values.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
-    if let Kind::Usage(provider) = kind {
-        values.insert(
-            "icon".into(),
-            format!("provider:{}", provider.descriptor().key),
-        );
-    }
+    use crate::builtin_icons::{Icon, Transit};
+    let icon = match kind {
+        Kind::Usage(provider) => format!("provider:{}", provider.descriptor().key),
+        Kind::Weather => crate::widgets::weather::preview_symbol(),
+        Kind::Calendar => Icon::Calendar.key().into(),
+        Kind::Mail => Icon::Mail.key().into(),
+        Kind::News => Icon::News.key().into(),
+        Kind::NowPlaying => Icon::Music { paused: false }.key().into(),
+        Kind::Departures => Icon::Transit(Transit::Bus).key().into(),
+    };
+    values.insert("icon".into(), icon);
     values
 }
 
