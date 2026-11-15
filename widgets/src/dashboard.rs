@@ -834,11 +834,18 @@ impl Dashboard {
                     .filter(|l| !l.is_empty())
                     .collect();
             }
-            style::field(
-                ui,
-                "Direction (destination contains, blank for all)",
-                &mut self.draft.departures.direction,
-                false,
+            ui.label("Direction");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.draft.departures.direction)
+                    .hint_text("Sentrum")
+                    .desired_width(240.0),
+            );
+            ui.colored_label(
+                style::MUTED,
+                "Shows only departures whose destination, as written on the front of the \
+                 bus or train, contains this text. Not case-sensitive. Use it to see only \
+                 one direction of a line, for example \"Sentrum\" for trips into town. \
+                 Leave it blank for every direction.",
             );
             ui.horizontal(|ui| {
                 ui.label("Refresh (seconds)");
