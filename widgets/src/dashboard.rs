@@ -178,6 +178,9 @@ struct Dashboard {
     search: PlaceSearch,
     stop_search: crate::place_search::StopSearch,
     new_feed: crate::config::FeedSource,
+    /// The Lines box as typed. Kept apart from the parsed list, so a comma
+    /// just typed is not dropped before the next number follows it.
+    lines_text: String,
     notice: Option<(bool, String)>,
     test: Option<Receiver<Result<String, String>>>,
     test_configuration: Option<(bool, Config)>,
@@ -203,6 +206,7 @@ impl Dashboard {
             search: PlaceSearch::default(),
             stop_search: Default::default(),
             new_feed: Default::default(),
+            lines_text: String::new(),
             notice: None,
             test: None,
             test_configuration: None,
@@ -818,21 +822,21 @@ impl Dashboard {
         ui.add_space(12.0);
         style::group(ui, |ui| {
             ui.label(egui::RichText::new("Filters").size(16.0).strong());
-            let mut lines = self.draft.departures.lines.join(", ");
+            // Start again from the saved list only when it changed some
+            // other way (loaded, discarded, saved elsewhere).
+            if parse_lines(&self.lines_text) != self.draft.departures.lines {
+                self.lines_text = self.draft.departures.lines.join(", ");
+            }
             ui.label("Lines (comma separated, blank for all)");
             if ui
                 .add(
-                    egui::TextEdit::singleline(&mut lines)
+                    egui::TextEdit::singleline(&mut self.lines_text)
                         .hint_text("31, 37")
                         .desired_width(240.0),
                 )
                 .changed()
             {
-                self.draft.departures.lines = lines
-                    .split(',')
-                    .map(|l| l.trim().to_owned())
-                    .filter(|l| !l.is_empty())
-                    .collect();
+                self.draft.departures.lines = parse_lines(&self.lines_text);
             }
             ui.label("Direction (comma separated, blank for all)");
             ui.add(
@@ -1293,6 +1297,14 @@ fn settings_for_save(base: &Config, draft: &Config, page: Page, all: bool) -> Co
     selected
 }
 
+/// Line numbers from the Lines box: comma separated, blanks skipped.
+fn parse_lines(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(|l| l.trim().to_owned())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
 fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
     for kind in Kind::ALL {
         kind.state(draft).double_click.merge_into(
@@ -1344,6 +1356,33 @@ fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_comma_typed_in_lines_survives_until_the_next_number() {
+        // The Lines box frame by frame, as `departures` runs it: the reset
+        // check, then one key typed, then the list parsed from the box.
+        let mut saved: Vec<String> = Vec::new();
+        let mut text = String::new();
+        for key in "81, 87".chars() {
+            if parse_lines(&text) != saved {
+                text = saved.join(", ");
+            }
+            text.push(key);
+            saved = parse_lines(&text);
+        }
+        assert_eq!(text, "81, 87", "every key typed stays in the box");
+        assert_eq!(saved, ["81", "87"]);
+        // Changed elsewhere (discarded, reloaded): the box follows.
+        saved = vec!["31".into()];
+        if parse_lines(&text) != saved {
+            text = saved.join(", ");
+        }
+        assert_eq!(text, "31");
+        assert_eq!(parse_lines("81,"), ["81"]);
+        assert_eq!(parse_lines(" 81 , ,87 "), ["81", "87"]);
+        assert!(parse_lines(" , ").is_empty());
+    }
+
     #[test]
     fn action_editor_fits_the_settings_column_and_can_render_a_fixture() {
         use crate::{
@@ -1359,6 +1398,7 @@ mod tests {
             search: PlaceSearch::default(),
             stop_search: Default::default(),
             new_feed: Default::default(),
+            lines_text: String::new(),
             notice: None,
             test: None,
             test_configuration: None,
