@@ -9,14 +9,37 @@ pub enum Action {
     OpenUrl,
     Refresh,
     LaunchApp,
+    /// Open what the pill shows now: the displayed headline, or the player.
+    OpenItem,
 }
 impl Action {
-    pub const ALL: [Self; 3] = [Self::OpenUrl, Self::Refresh, Self::LaunchApp];
+    pub const ALL: [Self; 4] = [
+        Self::OpenUrl,
+        Self::Refresh,
+        Self::LaunchApp,
+        Self::OpenItem,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::OpenUrl => "Open URL",
             Self::Refresh => "Refresh widget",
             Self::LaunchApp => "Launch app",
+            Self::OpenItem => "Open current item",
+        }
+    }
+    /// What `kind` offers. Only pills with a changing item can open it.
+    pub fn for_kind(kind: Kind) -> Vec<Self> {
+        Self::ALL
+            .into_iter()
+            .filter(|a| *a != Self::OpenItem || kind.has_current_item())
+            .collect()
+    }
+    /// Label for `kind`, naming the item where that is clearer.
+    pub fn label_for(self, kind: Kind) -> &'static str {
+        match (self, kind) {
+            (Self::OpenItem, Kind::News) => "Open displayed headline",
+            (Self::OpenItem, Kind::NowPlaying) => "Open media player",
+            _ => self.label(),
         }
     }
 }
@@ -36,35 +59,30 @@ pub enum Target {
     Url(String),
     Refresh,
     App(PathBuf),
+    CurrentItem,
 }
 
 impl Settings {
     pub fn action(&self, kind: Kind) -> Action {
-        self.action.unwrap_or(if matches!(kind, Kind::Usage(_)) {
-            Action::Refresh
-        } else {
-            Action::OpenUrl
+        self.action.unwrap_or(match kind {
+            Kind::Usage(_) | Kind::Departures => Action::Refresh,
+            Kind::News | Kind::NowPlaying => Action::OpenItem,
+            _ => Action::OpenUrl,
         })
     }
 
     pub fn resolve(&self, kind: Kind, cfg: &Config) -> Result<Target, String> {
         match self.action(kind) {
             Action::Refresh => Ok(Target::Refresh),
+            Action::OpenItem if kind.has_current_item() => Ok(Target::CurrentItem),
+            Action::OpenItem => Err("This widget has no current item to open.".into()),
             Action::OpenUrl => {
                 let text = if self.url.trim().is_empty() {
                     kind.default_url(cfg)
                 } else {
                     self.url.trim().into()
                 };
-                if text.chars().any(char::is_control) {
-                    return Err("Enter a web URL without line breaks or control characters.".into());
-                }
-                let parsed = url::Url::parse(&text)
-                    .map_err(|_| "Enter a complete http:// or https:// URL.")?;
-                if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-                    return Err("Enter a complete http:// or https:// URL.".into());
-                }
-                Ok(Target::Url(parsed.into()))
+                web_url(&text).map(Target::Url)
             }
             Action::LaunchApp => {
                 let text = self.app.trim();
@@ -113,6 +131,20 @@ impl Settings {
         }
         *base = fresh.clone();
     }
+}
+
+/// `text` as a web address, or why it is not one. Only http and https with a
+/// host pass, so a URL from a feed or the settings can never run a program.
+pub fn web_url(text: &str) -> Result<String, String> {
+    let text = text.trim();
+    if text.chars().any(char::is_control) {
+        return Err("Enter a web URL without line breaks or control characters.".into());
+    }
+    let parsed = url::Url::parse(text).map_err(|_| "Enter a complete http:// or https:// URL.")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("Enter a complete http:// or https:// URL.".into());
+    }
+    Ok(parsed.into())
 }
 
 pub fn launch(path: &std::path::Path) -> Result<(), String> {

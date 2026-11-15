@@ -86,3 +86,85 @@ impl PlaceSearch {
         selected
     }
 }
+
+/// Entur stop search for the departures page.
+#[derive(Default)]
+pub struct StopSearch {
+    query: String,
+    results: Vec<crate::config::Stop>,
+    pending: Option<Receiver<Result<Vec<crate::config::Stop>, String>>>,
+    status: String,
+}
+
+impl StopSearch {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<crate::config::Stop> {
+        if let Some(rx) = &self.pending {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.pending = None;
+                    match result {
+                        Ok(results) => {
+                            self.status = if results.is_empty() {
+                                "No stops found. Try another name.".into()
+                            } else {
+                                "Choose a stop:".into()
+                            };
+                            self.results = results;
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.pending = None;
+                    self.status = "Search stopped. Try again.".into();
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        ui.label("Find a stop");
+        let input = ui.add(
+            egui::TextEdit::singleline(&mut self.query)
+                .hint_text("Jernbanetorget, Bergen busstasjon…"),
+        );
+        let enabled = self.pending.is_none() && !self.query.trim().is_empty();
+        let enter = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (ui
+            .add_enabled(enabled, egui::Button::new("Search stops"))
+            .clicked()
+            || enter)
+            && enabled
+        {
+            let (tx, rx) = mpsc::channel();
+            let query = self.query.trim().to_owned();
+            let ctx = ui.ctx().clone();
+            self.pending = Some(rx);
+            self.results.clear();
+            self.status = "Searching…".into();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::widgets::departures::search_stops(&query));
+                ctx.request_repaint();
+            });
+        }
+        if self.pending.is_some() {
+            ui.spinner();
+        }
+        if !self.status.is_empty() {
+            ui.label(&self.status);
+        }
+        let mut selected = None;
+        for stop in &self.results {
+            if ui.button(&stop.name).clicked() {
+                selected = Some(stop.clone());
+            }
+        }
+        if selected.is_some() {
+            self.results.clear();
+            self.status.clear();
+        }
+        ui.hyperlink_to(
+            "Stops and departures by Entur",
+            "https://developer.entur.org/",
+        );
+        selected
+    }
+}

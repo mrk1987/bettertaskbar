@@ -292,11 +292,15 @@ impl Widget for UsageWidget {
             crate::provider_icons::paint(ui, rect, self.provider);
             ui.vertical(|ui| {
                 // Exactly the widest line the format can produce: the pill
-                // never resizes as numbers tick. Notices truncate instead.
+                // never resizes as numbers tick. Longer notices scroll instead.
                 ui.set_width(width);
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
-                ui.add(egui::Label::new(egui::RichText::new(a).size(12.0)).truncate());
-                ui.add(egui::Label::new(egui::RichText::new(b).size(11.0).weak()).truncate());
+                crate::widgets::marquee::line(ui, egui::RichText::new(a).size(12.0), "first");
+                crate::widgets::marquee::line(
+                    ui,
+                    egui::RichText::new(b).size(11.0).weak(),
+                    "second",
+                );
             });
         });
     }
@@ -339,6 +343,32 @@ fn widest(name: &str, measure: impl Fn(&str) -> f32) -> f32 {
         }
     }
     lines.iter().map(|l| measure(l)).fold(0.0, f32::max)
+}
+
+#[cfg(test)]
+impl UsageWidget {
+    /// Fixed sample data for the README banner (`single.rs`, `readme_banner`):
+    /// no thread, no network, nothing from the user's own accounts.
+    pub fn sample(provider: ProviderId, session: f64, weekly: f64, reset_secs: u64) -> Self {
+        let now = std::time::SystemTime::now();
+        let section = |percentage, secs| codezeno_usage_core::models::UsageSection {
+            available: true,
+            percentage,
+            resets_at: Some(now + Duration::from_secs(secs)),
+        };
+        Self {
+            provider,
+            refresh: Default::default(),
+            rx: mpsc::channel().1,
+            data: Some(UsageData {
+                session: section(session, reset_secs),
+                weekly: section(weekly, 3 * 86_400 + 5 * 3600),
+                ..Default::default()
+            }),
+            notice: None,
+            text_width: None,
+        }
+    }
 }
 
 #[cfg(test)]

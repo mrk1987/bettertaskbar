@@ -43,7 +43,11 @@ their last settings and leave the file alone.
 ```
 
 The settings for each widget are described on its own page:
-[weather](weather.md), [calendar](calendar.md), [mail](mail.md).
+[weather](weather.md), [calendar](calendar.md), [mail](mail.md),
+[now playing](now-playing.md) (`now_playing_widget`, no settings),
+[next departure](departures.md) (`departures`, `departures_widget`) and
+[news](news.md) (`news`, `news_widget`). The last three are off until switched
+on.
 
 ## Placement
 
@@ -71,9 +75,11 @@ Each widget state (including each entry in `usage_widgets`) accepts:
 }
 ```
 
-`action` is `open_url`, `refresh`, or `launch_app`. Missing or `null` keeps
-the original behavior: open the default website for weather/calendar/mail,
-or refresh for usage widgets. An empty `url` uses the widget's default
+`action` is `open_url`, `refresh`, `launch_app`, or `open_item` (News and
+Now Playing only: open the headline on screen, or the player). Missing or
+`null` keeps the default: open the default website for weather/calendar/mail,
+refresh for usage widgets and Next Departure, and `open_item` for News and
+Now Playing. An empty `url` uses the widget's default
 website. App paths are full `.exe` paths, without quotes or arguments.
 Both targets are retained when changing the action. Theme exports contain
 neither target.

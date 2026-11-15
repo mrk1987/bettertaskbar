@@ -34,17 +34,47 @@ pub enum Page {
     Weather,
     Calendar,
     Mail,
+    NowPlaying,
+    Departures,
+    News,
     Usage,
     Studio,
     About,
 }
 impl Page {
+    /// The settings page of a widget.
+    pub fn of(kind: Kind) -> Self {
+        match kind {
+            Kind::Weather => Self::Weather,
+            Kind::Calendar => Self::Calendar,
+            Kind::Mail => Self::Mail,
+            Kind::NowPlaying => Self::NowPlaying,
+            Kind::Departures => Self::Departures,
+            Kind::News => Self::News,
+            Kind::Usage(_) => Self::Usage,
+        }
+    }
+    /// Pages with a Save button for their own settings.
+    fn has_settings(self) -> bool {
+        matches!(
+            self,
+            Self::Weather
+                | Self::Calendar
+                | Self::Mail
+                | Self::NowPlaying
+                | Self::Departures
+                | Self::News
+        )
+    }
     pub fn key(self) -> &'static str {
         match self {
             Self::Widgets => "widgets",
             Self::Weather => "weather",
             Self::Calendar => "calendar",
             Self::Mail => "mail",
+            Self::NowPlaying => "now-playing",
+            Self::Departures => "departures",
+            Self::News => "news",
             Self::Usage => "usage",
             Self::Studio => "studio",
             Self::About => "about",
@@ -55,6 +85,9 @@ impl Page {
             "weather" => Self::Weather,
             "calendar" => Self::Calendar,
             "mail" => Self::Mail,
+            "now-playing" => Self::NowPlaying,
+            "departures" => Self::Departures,
+            "news" => Self::News,
             "usage" => Self::Usage,
             "studio" => Self::Studio,
             "about" => Self::About,
@@ -67,16 +100,22 @@ impl Page {
             Self::Weather => "Weather",
             Self::Calendar => "Calendar",
             Self::Mail => "Mail",
+            Self::NowPlaying => "Now Playing",
+            Self::Departures => "Next Departure",
+            Self::News => "News",
             Self::Usage => "Usage providers",
             Self::Studio => "Theme Studio",
             Self::About => "About",
         }
     }
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 10] = [
         Self::Widgets,
         Self::Weather,
         Self::Calendar,
         Self::Mail,
+        Self::NowPlaying,
+        Self::Departures,
+        Self::News,
         Self::Usage,
         Self::Studio,
         Self::About,
@@ -101,6 +140,11 @@ pub fn open(page: Page) {
     }
 }
 
+/// Codes for `open_action`: one slot per widget, each with room for
+/// "no preselection" plus every action.
+const ACTION_SLOTS: usize = 8;
+const _: () = assert!(crate::click_action::Action::ALL.len() < ACTION_SLOTS);
+
 /// Open the selected widget's editor, optionally preselecting an unsaved mode.
 pub fn open_action(kind: Kind, action: Option<crate::click_action::Action>) {
     let mode = action
@@ -110,7 +154,7 @@ pub fn open_action(kind: Kind, action: Option<crate::click_action::Action>) {
                 .position(|v| *v == a)
         })
         .map_or(0, |i| i + 1);
-    let code = kind.index() * 4 + mode;
+    let code = kind.index() * ACTION_SLOTS + mode;
     if let Some(hwnd) = crate::shell::find_by_title(TITLE) {
         open(Page::Widgets);
         unsafe {
@@ -132,6 +176,8 @@ struct Dashboard {
     draft: Config,
     page: Page,
     search: PlaceSearch,
+    stop_search: crate::place_search::StopSearch,
+    new_feed: crate::config::FeedSource,
     notice: Option<(bool, String)>,
     test: Option<Receiver<Result<String, String>>>,
     test_configuration: Option<(bool, Config)>,
@@ -155,6 +201,8 @@ impl Dashboard {
             draft: base,
             page,
             search: PlaceSearch::default(),
+            stop_search: Default::default(),
+            new_feed: Default::default(),
             notice: None,
             test: None,
             test_configuration: None,
@@ -175,11 +223,13 @@ impl Dashboard {
         dashboard
     }
     fn focus_action(&mut self, code: usize) {
-        if let Some(&kind) = Kind::ALL.get(code / 4) {
+        if let Some(&kind) = Kind::ALL.get(code / ACTION_SLOTS) {
             self.page = Page::Widgets;
-            if !code.is_multiple_of(4) {
-                kind.state_mut(&mut self.draft).double_click.action =
-                    Some(crate::click_action::Action::ALL[code % 4 - 1]);
+            if let Some(&action) = (code % ACTION_SLOTS)
+                .checked_sub(1)
+                .and_then(|i| crate::click_action::Action::ALL.get(i))
+            {
+                kind.state_mut(&mut self.draft).double_click.action = Some(action);
             }
             self.action_focus = Some(kind);
         }
@@ -188,6 +238,8 @@ impl Dashboard {
         self.base.weather != self.draft.weather
             || self.base.calendar != self.draft.calendar
             || self.base.mail != self.draft.mail
+            || self.base.departures != self.draft.departures
+            || self.base.news != self.draft.news
             || Kind::ALL
                 .into_iter()
                 .any(|k| k.state(&self.base).double_click != k.state(&self.draft).double_click)
@@ -208,6 +260,8 @@ impl Dashboard {
                 self.base.weather = draft.weather.clone();
                 self.base.calendar = draft.calendar.clone();
                 self.base.mail = draft.mail.clone();
+                self.base.departures = draft.departures.clone();
+                self.base.news = draft.news.clone();
                 for kind in Kind::ALL {
                     kind.state_mut(&mut self.base).double_click =
                         kind.state(&draft).double_click.clone();
@@ -242,6 +296,8 @@ impl Dashboard {
         sync!(weather);
         sync!(calendar);
         sync!(mail);
+        sync!(departures);
+        sync!(news);
         for kind in Kind::ALL {
             kind.state_mut(&mut self.draft).double_click.refresh_from(
                 &mut kind.state_mut(&mut self.base).double_click,
@@ -284,8 +340,8 @@ impl Dashboard {
             let mut action = click.action(kind);
             ui.horizontal(|ui| {
                 let label = ui.label("On double-click");
-                egui::ComboBox::from_id_salt("mode").selected_text(action.label()).show_ui(ui, |ui| {
-                    for a in Action::ALL { ui.selectable_value(&mut action, a, a.label()); }
+                egui::ComboBox::from_id_salt("mode").selected_text(action.label_for(kind)).show_ui(ui, |ui| {
+                    for a in Action::for_kind(kind) { ui.selectable_value(&mut action, a, a.label_for(kind)); }
                 }).response.labelled_by(label.id);
             });
             if action != click.action(kind) { click.action = Some(action); }
@@ -296,6 +352,14 @@ impl Dashboard {
                     ui.label(egui::RichText::new(format!("Blank uses {default_url}")).color(style::MUTED));
                 }
                 Action::Refresh => { ui.label(egui::RichText::new("Fetches this widget’s data again. Repeated requests wait for the 30-second cooldown.").color(style::MUTED)); }
+                Action::OpenItem => {
+                    let text = match kind {
+                        Kind::News => "Opens the article for the headline on screen. The headline holds still while you click.",
+                        Kind::NowPlaying => "Brings up the app that is playing.",
+                        _ => "Opens what the widget shows.",
+                    };
+                    ui.label(egui::RichText::new(text).color(style::MUTED));
+                }
                 Action::LaunchApp => {
                     let label = ui.label("Application (.exe)");
                     ui.horizontal(|ui| {
@@ -404,13 +468,12 @@ impl Dashboard {
                     });
                 });
                 ui.horizontal(|ui| {
-                    if ui.button("Settings").clicked() {
-                        self.page = match kind {
-                            Kind::Weather => Page::Weather,
-                            Kind::Calendar => Page::Calendar,
-                            Kind::Mail => Page::Mail,
-                            Kind::Usage(_) => Page::Usage,
-                        };
+                    // On the Usage page the providers' settings are this page:
+                    // a Settings button would lead back to itself.
+                    if (Page::of(kind) != Page::Usage || !usage_only)
+                        && ui.button("Settings").clicked()
+                    {
+                        self.page = Page::of(kind);
                     }
                     if ui.button("Edit theme").clicked() {
                         self.studio.select(kind, &current);
@@ -677,6 +740,248 @@ impl Dashboard {
     }
 }
 
+impl Dashboard {
+    fn now_playing(&mut self, ui: &mut egui::Ui) {
+        style::heading(
+            ui,
+            "Now Playing",
+            "Shows what Windows’ own media controls show: Spotify, browsers, Media Player and other apps that report playback.",
+        );
+        style::group(ui, |ui| self.action_settings(ui, Kind::NowPlaying));
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.colored_label(
+                style::MUTED,
+                "Nothing to set up. The widget reads the current media session every two seconds, on this PC only.",
+            );
+        });
+    }
+
+    fn departures(&mut self, ui: &mut egui::Ui) {
+        style::heading(
+            ui,
+            "Next Departure",
+            "Upcoming departures from a saved stop, with a traffic level for the route.",
+        );
+        style::group(ui, |ui| self.action_settings(ui, Kind::Departures));
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.label(egui::RichText::new("Stop").size(16.0).strong());
+            match &self.draft.departures.stop {
+                Some(stop) => {
+                    ui.label(&stop.name);
+                    ui.colored_label(style::MUTED, &stop.id);
+                }
+                None => {
+                    ui.colored_label(style::MUTED, "No stop chosen yet. Search for one below.");
+                }
+            }
+            ui.add_space(6.0);
+            if let Some(stop) = self.stop_search.ui(ui) {
+                let favorites = &mut self.draft.departures.favorites;
+                if !favorites.contains(&stop) {
+                    favorites.push(stop.clone());
+                }
+                self.draft.departures.stop = Some(stop);
+            }
+        });
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.label(egui::RichText::new("Saved stops").size(16.0).strong());
+            ui.colored_label(
+                style::MUTED,
+                "Switch between these from the widget’s right-click menu.",
+            );
+            let mut remove = None;
+            for (i, stop) in self.draft.departures.favorites.iter().enumerate() {
+                ui.push_id(("stop", i), |ui| {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(
+                                self.draft.departures.stop.as_ref() == Some(stop),
+                                &stop.name,
+                            )
+                            .clicked()
+                        {
+                            self.draft.departures.stop = Some(stop.clone());
+                        }
+                        if ui.small_button("Remove").clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                });
+            }
+            if let Some(i) = remove {
+                self.draft.departures.favorites.remove(i);
+            }
+        });
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.label(egui::RichText::new("Filters").size(16.0).strong());
+            let mut lines = self.draft.departures.lines.join(", ");
+            ui.label("Lines (comma separated, blank for all)");
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut lines)
+                        .hint_text("31, 37")
+                        .desired_width(240.0),
+                )
+                .changed()
+            {
+                self.draft.departures.lines = lines
+                    .split(',')
+                    .map(|l| l.trim().to_owned())
+                    .filter(|l| !l.is_empty())
+                    .collect();
+            }
+            style::field(
+                ui,
+                "Direction (destination contains, blank for all)",
+                &mut self.draft.departures.direction,
+                false,
+            );
+            ui.horizontal(|ui| {
+                ui.label("Refresh (seconds)");
+                ui.add(
+                    egui::DragValue::new(&mut self.draft.departures.refresh_secs).range(30..=3600),
+                );
+            });
+        });
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.label(egui::RichText::new("Traffic").size(16.0).strong());
+            ui.checkbox(
+                &mut self.draft.departures.road_traffic,
+                "Read road situations along the route from Statens vegvesen",
+            );
+            ui.horizontal(|ui| {
+                ui.label("Counts situations within (metres)");
+                ui.add(
+                    egui::DragValue::new(&mut self.draft.departures.traffic_radius_m)
+                        .range(50..=2000),
+                );
+            });
+            ui.colored_label(
+                style::MUTED,
+                "None / Low / Medium / High comes from road situations (accidents, closures, roadworks) near the stops ahead, and from Entur’s disruption messages for the line. A bus running late does not count. With no road data, buses and trams show Unknown rather than None.",
+            );
+        });
+    }
+
+    fn news(&mut self, ui: &mut egui::Ui) {
+        style::heading(
+            ui,
+            "News",
+            "Rotating headlines with their source and age. Double-click opens the headline on screen.",
+        );
+        style::group(ui, |ui| self.action_settings(ui, Kind::News));
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.label(egui::RichText::new("Sources").size(16.0).strong());
+            ui.colored_label(
+                style::MUTED,
+                "Feeds list the newest stories first, which is not always the outlet’s own ranking.",
+            );
+            let mut remove = None;
+            let mut swap = None;
+            let count = self.draft.news.feeds.len();
+            // Measured once: inside a row the available width grows with the
+            // row's own content, and the buttons would be pushed off the page.
+            let width = ui.available_width();
+            let url_width = (width - 340.0).max(160.0);
+            let new_url_width = (width - 220.0).max(160.0);
+            for (i, feed) in self.draft.news.feeds.iter_mut().enumerate() {
+                ui.push_id(("feed", i), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut feed.enabled, "");
+                        ui.add(egui::TextEdit::singleline(&mut feed.name).desired_width(120.0));
+                        ui.add(egui::TextEdit::singleline(&mut feed.url).desired_width(url_width));
+                        if ui
+                            .add_enabled(i > 0, egui::Button::new("↑").small())
+                            .clicked()
+                        {
+                            swap = Some(i - 1);
+                        }
+                        if ui
+                            .add_enabled(i + 1 < count, egui::Button::new("↓").small())
+                            .clicked()
+                        {
+                            swap = Some(i);
+                        }
+                        if ui.small_button("Remove").clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                });
+            }
+            if let Some(i) = swap {
+                self.draft.news.feeds.swap(i, i + 1);
+            }
+            if let Some(i) = remove {
+                self.draft.news.feeds.remove(i);
+            }
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Add a source").strong());
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_feed.name)
+                        .hint_text("Name")
+                        .desired_width(120.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_feed.url)
+                        .hint_text("https://example.com/feed.xml (RSS or Atom)")
+                        .desired_width(new_url_width),
+                );
+                let valid = !self.new_feed.name.trim().is_empty()
+                    && crate::click_action::web_url(&self.new_feed.url).is_ok();
+                if ui.add_enabled(valid, egui::Button::new("Add")).clicked() {
+                    let mut feed = std::mem::take(&mut self.new_feed);
+                    feed.name = feed.name.trim().to_owned();
+                    feed.url = feed.url.trim().to_owned();
+                    feed.enabled = true;
+                    self.draft.news.feeds.push(feed);
+                }
+            });
+            if ui.button("Add missing built-in sources").clicked() {
+                for preset in config::news_presets() {
+                    if !self.draft.news.feeds.iter().any(|f| f.url == preset.url) {
+                        self.draft.news.feeds.push(crate::config::FeedSource {
+                            enabled: false,
+                            ..preset
+                        });
+                    }
+                }
+            }
+        });
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            ui.label(egui::RichText::new("Rotation").size(16.0).strong());
+            let n = &mut self.draft.news;
+            ui.horizontal(|ui| {
+                ui.label("Next headline every (seconds)");
+                ui.add(egui::DragValue::new(&mut n.rotate_secs).range(3..=600));
+            });
+            ui.checkbox(
+                &mut n.pause_on_hover,
+                "Pause while the pointer is on the widget",
+            );
+            ui.horizontal(|ui| {
+                ui.label("Refresh feeds (seconds)");
+                ui.add(egui::DragValue::new(&mut n.refresh_secs).range(300..=86400));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Skip headlines older than (hours)");
+                ui.add(egui::DragValue::new(&mut n.max_age_hours).range(1..=720));
+            });
+            ui.colored_label(
+                style::MUTED,
+                "The same story from two sources is shown once. When feeds cannot be reached, the widget keeps the last headlines and marks them offline.",
+            );
+        });
+    }
+}
+
 impl eframe::App for Dashboard {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if !self.hooked {
@@ -741,10 +1046,10 @@ impl eframe::App for Dashboard {
                     if let Some((ok,message))=&self.notice{ui.colored_label(if *ok{style::MUTED}else{style::DANGER},message);ui.add_space(8.0);}
                     if self.page==Page::Studio {self.studio.ui(ui,&self.cfg);return;}
                     egui::ScrollArea::vertical().id_salt("dashboard-page").show(ui,|ui|{match self.page{
-                        Page::Widgets=>self.widgets(ui,false),Page::Usage=>self.widgets(ui,true),Page::Weather=>self.weather(ui),Page::Calendar=>self.connection(ui,false),Page::Mail=>self.connection(ui,true),
-                        Page::About=>{style::heading(ui,"BetterTaskbar","Your taskbar widgets, in one place.");style::group(ui,|ui|{ui.label("Usage providers and dashboard styling are adapted from Claude Code Usage Monitor by Code Zeno Pty Ltd.");ui.hyperlink_to("Claude Code Usage Monitor (MIT)","https://github.com/CodeZeno/Claude-Code-Usage-Monitor");ui.hyperlink_to("BetterTaskbar source and third-party notices","https://github.com/mrk1987/bettertaskbar");ui.label("Weather: MET Norway / Yr. Place search: Open-Meteo / GeoNames.");egui::CollapsingHeader::new("CodeZeno MIT license").show(ui,|ui|{ui.label(include_str!("../vendor/codezeno-usage-core/LICENSE"));ui.label(include_str!("../assets/lobe-icons.LICENSE"));});});},Page::Studio=>{}
+                        Page::Widgets=>self.widgets(ui,false),Page::Usage=>self.widgets(ui,true),Page::Weather=>self.weather(ui),Page::Calendar=>self.connection(ui,false),Page::Mail=>self.connection(ui,true),Page::NowPlaying=>self.now_playing(ui),Page::Departures=>self.departures(ui),Page::News=>self.news(ui),
+                        Page::About=>{style::heading(ui,"BetterTaskbar","Your taskbar widgets, in one place.");style::group(ui,|ui|{ui.label("Usage providers and dashboard styling are adapted from Claude Code Usage Monitor by Code Zeno Pty Ltd.");ui.hyperlink_to("Claude Code Usage Monitor (MIT)","https://github.com/CodeZeno/Claude-Code-Usage-Monitor");ui.hyperlink_to("BetterTaskbar source and third-party notices","https://github.com/mrk1987/bettertaskbar");ui.label("Weather: MET Norway / Yr. Place search: Open-Meteo / GeoNames.");ui.label("Departures and stop search: Entur (NLOD). Road situations: Statens vegvesen DATEX II (NLOD).");ui.label("News headlines link to each outlet’s own site.");egui::CollapsingHeader::new("CodeZeno MIT license").show(ui,|ui|{ui.label(include_str!("../vendor/codezeno-usage-core/LICENSE"));ui.label(include_str!("../assets/lobe-icons.LICENSE"));});});},Page::Studio=>{}
                     }
-                    if matches!(self.page,Page::Weather|Page::Calendar|Page::Mail){ui.add_space(16.0);ui.horizontal(|ui|{if ui.add(egui::Button::new("Save changes").fill(style::ACCENT)).clicked(){self.save(false);}
+                    if self.page.has_settings(){ui.add_space(16.0);ui.horizontal(|ui|{if ui.add(egui::Button::new("Save changes").fill(style::ACCENT)).clicked(){self.save(false);}
 if ui.button("Discard edits").clicked(){self.discard_page();}});}
                     });
                 });
@@ -864,6 +1169,9 @@ fn description(kind: Kind) -> &'static str {
         Kind::Weather => "Forecast, temperatures and precipitation",
         Kind::Calendar => "What is on now and what comes next",
         Kind::Mail => "Unread count and rotating message subjects",
+        Kind::NowPlaying => "Track, artist and playback state from Windows media",
+        Kind::Departures => "Next bus, tram, metro, train or boat, with a traffic level",
+        Kind::News => "Rotating headlines from news feeds you choose",
         Kind::Usage(_) => "Usage limits and reset times",
     }
 }
@@ -909,6 +1217,24 @@ fn validate(c: &Config) -> Result<(), String> {
     {
         return Err("Choose a weather refresh from 1800–86400 seconds, mail/calendar refresh from 30–86400 seconds, and subject rotation from 1–3600 seconds.".into());
     }
+    if !(30..=3600).contains(&c.departures.refresh_secs)
+        || !(50..=2000).contains(&c.departures.traffic_radius_m)
+    {
+        return Err("Choose a departure refresh from 30–3600 seconds and a traffic radius from 50–2000 metres.".into());
+    }
+    if !(300..=86400).contains(&c.news.refresh_secs)
+        || !(3..=600).contains(&c.news.rotate_secs)
+        || !(1..=720).contains(&c.news.max_age_hours)
+    {
+        return Err("Choose a news refresh from 300–86400 seconds, rotation from 3–600 seconds and a maximum age from 1–720 hours.".into());
+    }
+    for feed in &c.news.feeds {
+        if feed.name.trim().is_empty() || feed.name.contains(['\r', '\n']) {
+            return Err("Give every news source a name on one line.".into());
+        }
+        crate::click_action::web_url(&feed.url)
+            .map_err(|e| format!("News source “{}”: {e}", feed.name))?;
+    }
     if let Some(place) = &c.weather.place {
         if !place.lat.is_finite()
             || !place.lon.is_finite()
@@ -937,6 +1263,8 @@ fn settings_for_save(base: &Config, draft: &Config, page: Page, all: bool) -> Co
         Page::Weather => selected.weather = draft.weather.clone(),
         Page::Calendar => selected.calendar = draft.calendar.clone(),
         Page::Mail => selected.mail = draft.mail.clone(),
+        Page::Departures => selected.departures = draft.departures.clone(),
+        Page::News => selected.news = draft.news.clone(),
         _ => {}
     }
     for kind in Kind::ALL {
@@ -945,6 +1273,9 @@ fn settings_for_save(base: &Config, draft: &Config, page: Page, all: bool) -> Co
             Page::Weather => kind == Kind::Weather,
             Page::Calendar => kind == Kind::Calendar,
             Page::Mail => kind == Kind::Mail,
+            Page::NowPlaying => kind == Kind::NowPlaying,
+            Page::Departures => kind == Kind::Departures,
+            Page::News => kind == Kind::News,
             Page::Usage => matches!(kind, Kind::Usage(_)),
             _ => false,
         };
@@ -984,6 +1315,24 @@ fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
         refresh_secs,
         rotate_secs
     );
+    fields!(
+        departures,
+        stop,
+        favorites,
+        lines,
+        direction,
+        refresh_secs,
+        road_traffic,
+        traffic_radius_m
+    );
+    fields!(
+        news,
+        feeds,
+        refresh_secs,
+        rotate_secs,
+        pause_on_hover,
+        max_age_hours
+    );
 }
 #[cfg(test)]
 mod tests {
@@ -1001,6 +1350,8 @@ mod tests {
             draft: cfg.clone(),
             page: Page::Widgets,
             search: PlaceSearch::default(),
+            stop_search: Default::default(),
+            new_feed: Default::default(),
             notice: None,
             test: None,
             test_configuration: None,

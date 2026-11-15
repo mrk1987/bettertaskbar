@@ -238,6 +238,9 @@ pub fn sample(kind: crate::app::Kind) -> Values {
         Kind::Weather => ("8° / 2°", "3 mm"),
         Kind::Calendar => ("Now: Project review", "Next: Team meeting · 14:30"),
         Kind::Mail => ("Design review notes", "5 unread"),
+        Kind::NowPlaying => ("Running Up That Hill", "Kate Bush"),
+        Kind::Departures => ("Bus 31 · 6 min", "Traffic: High"),
+        Kind::News => ("Storting agrees on next year's budget", "NRK · 12 min"),
         _ => ("Session: 34% used · 2h 15m", "Weekly: 62% used · 3d 4h"),
     };
     let mut values: Values = [
@@ -250,8 +253,22 @@ pub fn sample(kind: crate::app::Kind) -> Values {
     .map(|(k, v)| (k.into(), v.into()))
     .collect();
     let extra: &[(&str, &str)] = match kind {
-        Kind::Weather => &[("high", "8"), ("low", "2"), ("precip", "3")],
+        Kind::Weather => &[
+            ("high", "8"),
+            ("low", "2"),
+            ("precip", "3"),
+            ("rain_hint", "Rain 40m"),
+        ],
         Kind::Mail => &[("count", "5")],
+        Kind::NowPlaying => &[("state", "Playing"), ("artist", "Kate Bush")],
+        Kind::Departures => &[
+            ("traffic", "High"),
+            ("mode", "Bus"),
+            ("line", "31"),
+            ("minutes", "6"),
+            ("destination", "Tonsenhagen"),
+        ],
+        Kind::News => &[("source", "NRK"), ("age", "12 min")],
         Kind::Usage(_) => &[("usage", "34"), ("weekly", "62"), ("reset", "2h 15m")],
         _ => &[],
     };

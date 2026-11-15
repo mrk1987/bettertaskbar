@@ -1,5 +1,9 @@
 pub mod calendar;
+pub mod departures;
 pub mod mail;
+pub mod marquee;
+pub mod news;
+pub mod now_playing;
 pub mod usage;
 pub mod weather;
 
@@ -19,6 +23,17 @@ pub trait Widget {
     fn size(&self) -> (f32, f32);
     fn refresh(&mut self);
     fn ui(&mut self, ui: &mut egui::Ui, icons: &mut IconCache);
+    /// The pointer is over the pill (`hovered`), or was just pressed on it.
+    fn interaction(&mut self, _hovered: bool, _pressed: bool) {}
+    /// Whether `pos` is on a button of the pill's own. A press there neither
+    /// drags the pill nor counts toward its double-click action.
+    fn control_at(&self, _pos: egui::Pos2) -> bool {
+        false
+    }
+    /// Open what the pill shows right now (the "Open current item" action).
+    fn open_current(&mut self) -> Result<(), String> {
+        Err("This widget has no current item to open.".into())
+    }
 }
 
 /// What a background fetch produced for a pill.

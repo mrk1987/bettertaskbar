@@ -87,6 +87,18 @@ fn pack(slots: &[(i32, i32)], items: &[(i32, DockSide)], gap: i32) -> Vec<Option
     result
 }
 
+/// The order to `pack` pills in, from their centers: left pills from the left
+/// edge inward, right pills from the tray inward. Packing then keeps the
+/// order the user placed them in, rather than a fixed order by kind.
+fn pack_order(centers: &[(i32, DockSide)]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..centers.len()).collect();
+    order.sort_by_key(|&i| match centers[i] {
+        (c, DockSide::Left) => (0, c),
+        (c, DockSide::Right) => (1, -c),
+    });
+    order
+}
+
 fn side_at(slots: &[(i32, i32)], x: i32, width: i32) -> DockSide {
     let usable: Vec<_> = slots
         .iter()
@@ -195,6 +207,9 @@ pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
     }
     occupancy::set_magnetic(true);
     let mut inferred = Vec::new();
+    // Packed positions that differ from the saved ones; saved so the order
+    // survives a restart and the next drop is compared with the real layout.
+    let mut packed = Vec::new();
     // One enumeration of every top-level window per tick, not one per pill.
     let bars = shell::taskbars();
     for bar in bars.iter().cloned() {
@@ -276,10 +291,32 @@ pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
         let gap = ((bar.rect.bottom - bar.rect.top) as f32 / 48.0 * 2.0)
             .round()
             .max(1.0) as i32;
-        let positions = pack(&slots, &items, gap);
+        // Where each pill was last put: a dropped pill at its drop point,
+        // the others where the previous pack left them.
+        let centers: Vec<_> = docked
+            .iter()
+            .zip(&items)
+            .map(|((kind, _, rect), &(width, side))| {
+                let left = kind
+                    .state(&settings)
+                    .manual_bar_offset
+                    .map_or(rect.left, |offset| bar.rect.left + offset);
+                (left + width / 2, side)
+            })
+            .collect();
+        let order = pack_order(&centers);
+        let ordered: Vec<_> = order.iter().map(|&i| items[i]).collect();
+        let mut positions = vec![None; items.len()];
+        for (x, &i) in pack(&slots, &ordered, gap).into_iter().zip(&order) {
+            positions[i] = x;
+        }
         for ((kind, hwnd, rect), x) in docked.into_iter().zip(positions) {
             match x {
                 Some(x) => {
+                    let saved = kind.state(&settings).manual_bar_offset;
+                    if saved != Some(x - bar.rect.left) {
+                        packed.push((kind, saved, x - bar.rect.left));
+                    }
                     let y = bar.rect.top
                         + (bar.rect.bottom - bar.rect.top - (rect.bottom - rect.top)) / 2;
                     if (rect.left, rect.top) != (x, y) {
@@ -297,10 +334,17 @@ pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
         }
     }
     publish(&status);
-    if !inferred.is_empty() {
+    if !inferred.is_empty() || !packed.is_empty() {
         config::update(cfg, |c| {
             if !c.magnetized {
                 return;
+            }
+            for (kind, read, offset) in packed {
+                let state = kind.state_mut(c);
+                // Skip a pill that was dropped again since this pass read it.
+                if state.manual_bar_offset == read && state.placement == Placement::Taskbar {
+                    state.manual_bar_offset = Some(offset);
+                }
             }
             for (kind, side, offset, manual) in inferred {
                 let state = kind.state_mut(c);
@@ -407,6 +451,35 @@ mod tests {
             4,
         );
         assert_eq!(out, vec![Some(900), Some(776), Some(0), Some(84)]);
+    }
+    #[test]
+    fn pills_keep_the_order_they_were_placed_in() {
+        // Left side: Weather 0-70, Departures 72-260, Calendar 262-480, and
+        // Mail just dropped at 230, between Departures and Calendar.
+        let centers = [
+            (35, DockSide::Left),
+            (230 + 109, DockSide::Left),
+            (72 + 94, DockSide::Left),
+            (262 + 109, DockSide::Left),
+        ];
+        assert_eq!(pack_order(&centers), vec![0, 2, 1, 3]);
+        // Right side packs from the tray inward: rightmost first.
+        let right = [
+            (900, DockSide::Right),
+            (1000, DockSide::Right),
+            (950, DockSide::Right),
+        ];
+        assert_eq!(pack_order(&right), vec![1, 2, 0]);
+        // Packing in that order puts Mail between Departures and Calendar.
+        let widths = [70, 218, 188, 218];
+        let order = pack_order(&centers);
+        let items: Vec<_> = order.iter().map(|&i| (widths[i], DockSide::Left)).collect();
+        let packed = pack(&[(0, 2000)], &items, 2);
+        let mut x = [0; 4];
+        for (slot, &i) in order.iter().enumerate() {
+            x[i] = packed[slot].unwrap();
+        }
+        assert!(x[0] < x[2] && x[2] < x[1] && x[1] < x[3], "{x:?}");
     }
     #[test]
     fn overflow_never_overlaps_icons_or_other_widgets() {

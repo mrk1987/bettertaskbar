@@ -6,30 +6,16 @@ action.
 
 ## Planned widgets
 
-- [ ] **Now Playing:** show the current track, artist and playback state.
-  Keep it informational and compact; a double-click may open the player.
-- [ ] **Weather enrichment:** add a small amount of useful information to the
-  existing weather widget, keeping its compact size. A short rain-onset or
-  daylight hint is a candidate; the exact extra field is not yet selected.
-  Avoid adding a separate widget or a full forecast panel for this.
-- [ ] **Next Departure:** show upcoming bus/train departures for saved stops,
-  with line/direction filtering, countdowns and delays. Include a simple traffic
-  indicator for the selected bus route or journey: **None / Low / Medium /
-  High**. Keep the widget on two lines to maintain a consistent compact size:
-  line 1 `Bus 31 · 6 min`, line 2 `Traffic: High`. Keep road disruptions within
-  this widget rather than adding a separate traffic widget or map. Use
-  **Unknown** when relevant traffic data is unavailable or stale; do not imply
-  clear roads. Select and verify transport and route-relevant traffic sources
-  before implementation; do not derive congestion solely from bus lateness.
-- [ ] **News / RSS headlines:** rotate headlines from selectable major news
-  outlets, with custom RSS/Atom feed URLs. Show the source and publication age.
-  Double-click opens the article for the headline currently displayed, rather
-  than a fixed homepage. Add this dynamic action to the existing action settings
-  and right-click action menu. Keep the headline stable during interaction so
-  a double-click cannot open the next rotating story. Include rotation speed,
-  pause-on-hover, duplicate handling and a stale/offline indicator. Verify feed
-  availability and usage terms before choosing outlet presets; feed order may
-  represent latest stories rather than editorially ranked top headlines.
+Built 2026-11-14: Now Playing, weather rain onset, Next Departure (with
+transport-mode icons) and News. See `docs/now-playing.md`,
+`docs/departures.md`, `docs/news.md` and `docs/weather.md`.
+
+- [ ] **Now Playing:** confirm a real track is read on the live machine
+  (`--check=now-playing` while something plays). It was only checked with
+  nothing playing.
+- [ ] **Next Departure:** the open Vegvesen WFS layer gives no hours for
+  recurring works, so night closures are capped at Low all day. Revisit if
+  the full DATEX feed or a richer layer becomes practical.
 
 ## Suggestions awaiting selection
 

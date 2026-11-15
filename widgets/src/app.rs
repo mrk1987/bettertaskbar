@@ -56,6 +56,9 @@ pub enum Kind {
     Weather,
     Calendar,
     Mail,
+    NowPlaying,
+    Departures,
+    News,
     Usage(ProviderId),
 }
 
@@ -137,10 +140,13 @@ static DISABLED_USAGE: WidgetState = WidgetState {
 };
 
 impl Kind {
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 13] = [
         Kind::Weather,
         Kind::Calendar,
         Kind::Mail,
+        Kind::NowPlaying,
+        Kind::Departures,
+        Kind::News,
         Kind::Usage(ProviderId::Claude),
         Kind::Usage(ProviderId::Codex),
         Kind::Usage(ProviderId::Antigravity),
@@ -149,6 +155,11 @@ impl Kind {
         Kind::Usage(ProviderId::Grok),
         Kind::Usage(ProviderId::Copilot),
     ];
+
+    /// Whether the pill shows a changing item that "Open current item" opens.
+    pub fn has_current_item(self) -> bool {
+        matches!(self, Kind::News | Kind::NowPlaying)
+    }
 
     /// Position in `Kind::ALL`.
     pub fn index(self) -> usize {
@@ -160,6 +171,9 @@ impl Kind {
             Self::Weather => "weather",
             Self::Calendar => "calendar",
             Self::Mail => "mail",
+            Self::NowPlaying => "now-playing",
+            Self::Departures => "departures",
+            Self::News => "news",
             Self::Usage(p) => p.descriptor().key,
         }
     }
@@ -168,6 +182,9 @@ impl Kind {
             Self::Weather => "Weather",
             Self::Calendar => "Calendar",
             Self::Mail => "Mail",
+            Self::NowPlaying => "Now Playing",
+            Self::Departures => "Next Departure",
+            Self::News => "News",
             Self::Usage(p) => p.descriptor().display_name,
         }
     }
@@ -187,6 +204,20 @@ impl Kind {
             }
             Self::Calendar => "https://calendar.proton.me",
             Self::Mail => "https://mail.proton.me",
+            Self::NowPlaying => "https://open.spotify.com/",
+            Self::Departures => "https://entur.no/",
+            Self::News => {
+                return cfg
+                    .news
+                    .feeds
+                    .iter()
+                    .find(|f| f.enabled)
+                    .and_then(|f| url::Url::parse(&f.url).ok())
+                    .map_or_else(
+                        || "https://www.nrk.no/".into(),
+                        |u| format!("{}://{}/", u.scheme(), u.host_str().unwrap_or_default()),
+                    )
+            }
             Self::Usage(p) => match p {
                 ProviderId::Claude => "https://claude.ai/settings/usage",
                 ProviderId::Codex => "https://chatgpt.com/codex/settings/usage",
@@ -205,6 +236,9 @@ impl Kind {
             Kind::Weather => "BetterTaskbar Weather",
             Kind::Calendar => "BetterTaskbar Calendar",
             Kind::Mail => "BetterTaskbar Mail",
+            Kind::NowPlaying => "BetterTaskbar Now Playing",
+            Kind::Departures => "BetterTaskbar Next Departure",
+            Kind::News => "BetterTaskbar News",
             Kind::Usage(p) => match p {
                 ProviderId::Claude => "BetterTaskbar Claude Code",
                 ProviderId::Codex => "BetterTaskbar Codex",
@@ -222,6 +256,9 @@ impl Kind {
             Kind::Weather => &c.weather_widget,
             Kind::Calendar => &c.calendar_widget,
             Kind::Mail => &c.mail_widget,
+            Kind::NowPlaying => &c.now_playing_widget,
+            Kind::Departures => &c.departures_widget,
+            Kind::News => &c.news_widget,
             Kind::Usage(p) => c.usage_widgets.get(&p).unwrap_or(&DISABLED_USAGE),
         }
     }
@@ -231,6 +268,9 @@ impl Kind {
             Kind::Weather => &mut c.weather_widget,
             Kind::Calendar => &mut c.calendar_widget,
             Kind::Mail => &mut c.mail_widget,
+            Kind::NowPlaying => &mut c.now_playing_widget,
+            Kind::Departures => &mut c.departures_widget,
+            Kind::News => &mut c.news_widget,
             Kind::Usage(p) => c
                 .usage_widgets
                 .entry(p)
@@ -308,13 +348,35 @@ impl WidgetApp {
         DRAGGING[self.kind.index()].store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// A pill around a widget made elsewhere, for rendering tests.
+    #[cfg(test)]
+    pub fn with_widget(kind: Kind, cfg: SharedConfig, widget: Box<dyn Widget>) -> Self {
+        let mut app = Self::build(kind, cfg, widget);
+        app.in_process = true;
+        app
+    }
+
+    #[cfg(test)]
+    pub fn icons_mut(&mut self) -> &mut IconCache {
+        &mut self.icons
+    }
+
     pub fn new(kind: Kind, cfg: SharedConfig) -> Self {
         let widget: Box<dyn Widget> = match kind {
             Kind::Weather => Box::new(WeatherWidget::new(cfg.clone())),
             Kind::Calendar => Box::new(CalendarWidget::new(cfg.clone())),
             Kind::Mail => Box::new(MailWidget::new(cfg.clone())),
+            Kind::NowPlaying => Box::new(crate::widgets::now_playing::NowPlayingWidget::new()),
+            Kind::Departures => Box::new(crate::widgets::departures::DeparturesWidget::new(
+                cfg.clone(),
+            )),
+            Kind::News => Box::new(crate::widgets::news::NewsWidget::new(cfg.clone())),
             Kind::Usage(p) => Box::new(crate::widgets::usage::UsageWidget::new(p, cfg.clone())),
         };
+        Self::build(kind, cfg, widget)
+    }
+
+    fn build(kind: Kind, cfg: SharedConfig, widget: Box<dyn Widget>) -> Self {
         Self {
             kind,
             cfg,
@@ -355,6 +417,16 @@ impl WidgetApp {
             Kind::Calendar => GAP + WEATHER + GAP,
             Kind::Mail => GAP + WEATHER + GAP + 230 + GAP,
             Kind::Usage(p) => GAP + WEATHER + GAP + 230 + GAP + 230 + GAP + (p as i32) * 176,
+            // After every usage pill, so turning one on never lands on another.
+            Kind::NowPlaying | Kind::Departures | Kind::News => {
+                let after_usage = GAP + WEATHER + GAP + 230 + GAP + 230 + GAP + 7 * 176;
+                let slot = match self.kind {
+                    Kind::NowPlaying => 0,
+                    Kind::Departures => 1,
+                    _ => 2,
+                };
+                after_usage + slot * (230 + GAP)
+            }
         }
     }
 
@@ -693,6 +765,7 @@ impl WidgetApp {
             Place(Placement),
             Hide,
             Weather(crate::config::Place),
+            Stop(crate::config::Stop),
             Search,
             Settings,
             Quit,
@@ -708,11 +781,11 @@ impl WidgetApp {
         .map(|(p, label)| Item::Command(label.into(), placement == p, Action::Place(p)))
         .collect();
         let click = self.state().double_click;
-        let mut choices: Vec<_> = crate::click_action::Action::ALL
+        let mut choices: Vec<_> = crate::click_action::Action::for_kind(self.kind)
             .into_iter()
             .map(|action| {
                 Item::Command(
-                    action.label().into(),
+                    action.label_for(self.kind).into(),
                     click.action(self.kind) == action,
                     Action::DoubleClick(action),
                 )
@@ -752,6 +825,30 @@ impl WidgetApp {
             }
             items.push(Item::Command("Search place…".into(), false, Action::Search));
         }
+        if self.kind == Kind::Departures {
+            let departures = self.cfg.lock().unwrap().departures.clone();
+            let mut stops = Vec::new();
+            if let Some(current) = &departures.stop {
+                stops.push(Item::Command(
+                    current.name.clone(),
+                    true,
+                    Action::Stop(current.clone()),
+                ));
+            }
+            for favorite in departures.favorites {
+                if departures.stop.as_ref() != Some(&favorite) {
+                    stops.push(Item::Command(
+                        favorite.name.clone(),
+                        false,
+                        Action::Stop(favorite),
+                    ));
+                }
+            }
+            if !stops.is_empty() {
+                items.push(Item::Separator);
+                items.push(Item::Submenu("Stop".into(), stops));
+            }
+        }
         items.push(Item::Separator);
         items.push(Item::Command(
             "Quit all widgets".into(),
@@ -777,13 +874,13 @@ impl WidgetApp {
             Ok(Some(Action::Weather(place))) => {
                 crate::widgets::weather::set_place(&self.cfg, place)
             }
-            Ok(Some(Action::Search)) => crate::dashboard::open(crate::dashboard::Page::Weather),
-            Ok(Some(Action::Settings)) => crate::dashboard::open(match self.kind {
-                Kind::Weather => crate::dashboard::Page::Weather,
-                Kind::Calendar => crate::dashboard::Page::Calendar,
-                Kind::Mail => crate::dashboard::Page::Mail,
-                Kind::Usage(_) => crate::dashboard::Page::Usage,
+            Ok(Some(Action::Stop(stop))) => crate::config::update(&self.cfg, |c| {
+                c.departures.stop = Some(stop);
             }),
+            Ok(Some(Action::Search)) => crate::dashboard::open(crate::dashboard::Page::Weather),
+            Ok(Some(Action::Settings)) => {
+                crate::dashboard::open(crate::dashboard::Page::of(self.kind))
+            }
             Ok(Some(Action::Quit)) => crate::quit_all(),
             Ok(None) => {}
             Err(e) => crate::log::line("menu", &e.to_string()),
@@ -909,6 +1006,16 @@ impl WidgetApp {
                 style.visuals.weak_text_color = Some(TEXT_WEAK);
             });
         }
+        // Before `tick`, so a rotating pill holds its item from the very frame
+        // of a press: a double-click then opens what was under the cursor.
+        // The pill fills its whole window, so a pointer in the window is on it.
+        let (hovered, pressed) = ctx.input(|i| {
+            (
+                i.pointer.has_pointer(),
+                i.pointer.any_pressed() || i.pointer.any_down(),
+            )
+        });
+        self.widget.interaction(hovered, pressed);
         self.widget.tick();
         let ppp = ctx.pixels_per_point();
         let state = self.state();
@@ -1060,7 +1167,14 @@ impl WidgetApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(desired));
         }
 
-        let pressed = resp.is_pointer_button_down_on()
+        // A press on one of the pill's own buttons is that button's. Not
+        // press_origin: egui clears it on the release frame, where the
+        // double-click is decided.
+        let on_control = ctx
+            .input(|i| i.pointer.interact_pos())
+            .is_some_and(|pos| self.widget.control_at(pos));
+        let pressed = !on_control
+            && resp.is_pointer_button_down_on()
             && ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
         if let Some(hwnd) = hwnd {
             self.drag_frame(hwnd, pressed);
@@ -1069,7 +1183,7 @@ impl WidgetApp {
         if let Some(error) = &self.action_error {
             resp.clone().on_hover_text(error);
         }
-        if resp.double_clicked() {
+        if resp.double_clicked() && !on_control {
             let target = {
                 let cfg = self.cfg.lock().unwrap();
                 self.kind.state(&cfg).double_click.resolve(self.kind, &cfg)
@@ -1079,6 +1193,7 @@ impl WidgetApp {
                     self.widget.refresh();
                     Ok(())
                 }
+                crate::click_action::Target::CurrentItem => self.widget.open_current(),
                 crate::click_action::Target::Url(url) => shell::try_open_url(&url),
                 crate::click_action::Target::App(path) => crate::click_action::launch(&path),
             });

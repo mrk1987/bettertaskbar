@@ -12,17 +12,17 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use crate::app::Kind;
 use crate::config::{Placement, SharedConfig};
 
 const TRAY_MSG: u32 = WM_APP + 1;
-const ID_WEATHER: usize = 1;
-const ID_CALENDAR: usize = 2;
-const ID_MAIL: usize = 3;
 const ID_PIN_ALL: usize = 4;
 const ID_DETACH_ALL: usize = 5;
 const ID_DESKTOP_ALL: usize = 6;
 const ID_QUIT: usize = 9;
 const ID_DASHBOARD: usize = 10;
+/// Widget toggles are `ID_WIDGET + Kind::index()`.
+const ID_WIDGET: usize = 100;
 
 struct TrayState {
     cfg: SharedConfig,
@@ -34,6 +34,17 @@ fn wide(s: &str) -> Vec<u16> {
 
 fn state(hwnd: HWND) -> &'static TrayState {
     unsafe { &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const TrayState) }
+}
+
+/// The placement every enabled widget shares, if they all share one.
+fn common_placement(c: &crate::config::Config) -> Option<Placement> {
+    let mut enabled = Kind::ALL
+        .into_iter()
+        .map(|k| k.state(c))
+        .filter(|s| s.enabled)
+        .map(|s| s.placement);
+    let first = enabled.next()?;
+    enabled.all(|p| p == first).then_some(first)
 }
 
 fn command(hwnd: HWND, id: usize) {
@@ -48,60 +59,47 @@ fn command(hwnd: HWND, id: usize) {
     // `update` re-reads the file first, so the hub never writes back a copy
     // that predates a drag or an edit made elsewhere.
     crate::config::update(&state(hwnd).cfg, |c| match id {
-        ID_WEATHER => {
-            let state = &mut c.weather_widget;
-            if !state.enabled {
-                state.enabled = true;
-                state.visible = true;
-            } else {
-                state.visible = !state.visible;
-            }
-        }
-        ID_CALENDAR => {
-            let state = &mut c.calendar_widget;
-            if !state.enabled {
-                state.enabled = true;
-                state.visible = true;
-            } else {
-                state.visible = !state.visible;
-            }
-        }
-        ID_MAIL => {
-            let state = &mut c.mail_widget;
-            if !state.enabled {
-                state.enabled = true;
-                state.visible = true;
-            } else {
-                state.visible = !state.visible;
-            }
-        }
         ID_PIN_ALL | ID_DESKTOP_ALL | ID_DETACH_ALL => {
             let placement = match id {
                 ID_PIN_ALL => Placement::Taskbar,
                 ID_DESKTOP_ALL => Placement::Desktop,
                 _ => Placement::Floating,
             };
-            for kind in crate::app::Kind::ALL {
+            for kind in Kind::ALL {
                 kind.state_mut(c).placement = placement;
             }
         }
-        _ => {}
+        _ => {
+            let Some(kind) = id.checked_sub(ID_WIDGET).and_then(|i| Kind::ALL.get(i)) else {
+                return;
+            };
+            let state = kind.state_mut(c);
+            if !state.enabled {
+                state.enabled = true;
+                state.visible = true;
+            } else {
+                state.visible = !state.visible;
+            }
+        }
     });
 }
 
 fn show_menu(hwnd: HWND) {
     let st = state(hwnd);
     crate::config::refresh(&st.cfg);
-    let (w, c, m) = {
-        let cfg = st.cfg.lock().unwrap();
-        (
-            cfg.weather_widget.visible,
-            cfg.calendar_widget.visible,
-            cfg.mail_widget.visible,
-        )
-    };
+    let cfg = st.cfg.lock().unwrap().clone();
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
+        let Ok(usage) = CreatePopupMenu() else {
+            let _ = DestroyMenu(menu);
+            return;
+        };
+        // Labels must outlive TrackPopupMenu.
+        let mut labels: Vec<Vec<u16>> = Vec::new();
+        let mut add = |menu: HMENU, flags: MENU_ITEM_FLAGS, id: usize, text: &str| {
+            labels.push(wide(text));
+            let _ = AppendMenuW(menu, flags, id, PCWSTR(labels.last().unwrap().as_ptr()));
+        };
         let check = |on: bool| {
             if on {
                 MF_STRING | MF_CHECKED
@@ -109,31 +107,57 @@ fn show_menu(hwnd: HWND) {
                 MF_STRING
             }
         };
-        let l_dashboard = wide("Dashboard…");
-        let _ = AppendMenuW(menu, MF_STRING, ID_DASHBOARD, PCWSTR(l_dashboard.as_ptr()));
+        add(menu, MF_STRING, ID_DASHBOARD, "Dashboard…");
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let l_weather = wide("Weather");
-        let l_calendar = wide("Calendar");
-        let l_mail = wide("Mail");
-        let l_pin = wide("Pin all to taskbar");
-        let l_desktop = wide("Pin all to desktop");
-        let l_detach = wide("Float all on top");
-        let l_quit = wide("Quit");
-        let _ = AppendMenuW(menu, check(w), ID_WEATHER, PCWSTR(l_weather.as_ptr()));
-        let _ = AppendMenuW(menu, check(c), ID_CALENDAR, PCWSTR(l_calendar.as_ptr()));
-        let _ = AppendMenuW(menu, check(m), ID_MAIL, PCWSTR(l_mail.as_ptr()));
+        for kind in Kind::ALL {
+            let state = kind.state(&cfg);
+            let on = check(state.enabled && state.visible);
+            let id = ID_WIDGET + kind.index();
+            match kind {
+                Kind::Usage(_) => add(usage, on, id, kind.label()),
+                _ => add(menu, on, id, kind.label()),
+            }
+        }
+        labels.push(wide("AI usage"));
+        let _ = AppendMenuW(
+            menu,
+            MF_POPUP,
+            usage.0 as usize,
+            PCWSTR(labels.last().unwrap().as_ptr()),
+        );
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, ID_PIN_ALL, PCWSTR(l_pin.as_ptr()));
-        let _ = AppendMenuW(menu, MF_STRING, ID_DESKTOP_ALL, PCWSTR(l_desktop.as_ptr()));
-        let _ = AppendMenuW(menu, MF_STRING, ID_DETACH_ALL, PCWSTR(l_detach.as_ptr()));
+        let common = common_placement(&cfg);
+        let mut placement = |id: usize, p: Placement, text: &str| {
+            labels.push(wide(text));
+            let _ = AppendMenuW(
+                menu,
+                check(common == Some(p)),
+                id,
+                PCWSTR(labels.last().unwrap().as_ptr()),
+            );
+            if common == Some(p) {
+                let _ = CheckMenuRadioItem(menu, id as u32, id as u32, id as u32, MF_BYCOMMAND.0);
+            }
+        };
+        placement(ID_PIN_ALL, Placement::Taskbar, "Pin all to taskbar");
+        placement(ID_DESKTOP_ALL, Placement::Desktop, "Pin all to desktop");
+        placement(ID_DETACH_ALL, Placement::Floating, "Float all on top");
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, ID_QUIT, PCWSTR(l_quit.as_ptr()));
+        labels.push(wide("Quit"));
+        let _ = AppendMenuW(
+            menu,
+            MF_STRING,
+            ID_QUIT,
+            PCWSTR(labels.last().unwrap().as_ptr()),
+        );
         let mut pt = POINT::default();
         let _ = GetCursorPos(&mut pt);
         let _ = SetForegroundWindow(hwnd);
         let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, None, hwnd, None);
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
+        // Destroys the AI usage submenu with it.
         let _ = DestroyMenu(menu);
+        drop(labels);
     }
 }
 
@@ -308,4 +332,24 @@ pub fn spawn(cfg: SharedConfig) -> std::thread::JoinHandle<()> {
             DispatchMessageW(&msg);
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn placement_is_checked_only_when_every_enabled_widget_shares_it() {
+        let mut c = crate::config::Config::default();
+        for kind in Kind::ALL {
+            kind.state_mut(&mut c).placement = Placement::Taskbar;
+        }
+        assert_eq!(common_placement(&c), Some(Placement::Taskbar));
+        // A disabled widget elsewhere does not count.
+        Kind::News.state_mut(&mut c).enabled = false;
+        Kind::News.state_mut(&mut c).placement = Placement::Floating;
+        assert_eq!(common_placement(&c), Some(Placement::Taskbar));
+        Kind::Weather.state_mut(&mut c).placement = Placement::Desktop;
+        assert_eq!(common_placement(&c), None);
+    }
 }

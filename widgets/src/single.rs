@@ -225,6 +225,7 @@ impl Surface {
             SourceConstantAlpha: 255,
             AlphaFormat: AC_SRC_ALPHA as u8,
         };
+        crate::shell::ensure_layered(hwnd);
         unsafe {
             // A screen DC, as UpdateLayeredWindow expects; no destination
             // point, so placement stays with `shell::place` and the hub.
@@ -340,6 +341,52 @@ impl Painter {
     }
 }
 
+/// Debug builds: with `BTW_DUMP` set to a folder, save each pill's last
+/// frame there as `<kind>.png` and log its texture state, at most every 5 s.
+#[cfg(debug_assertions)]
+fn debug_dump(kind: Kind, canvas: &Canvas, painter: &Painter) {
+    use std::collections::HashMap;
+    thread_local!(static LAST: RefCell<HashMap<&'static str, Instant>> = RefCell::default());
+    let Ok(dir) = std::env::var("BTW_DUMP") else {
+        return;
+    };
+    let key = kind.key();
+    let due = LAST.with(|l| {
+        let mut l = l.borrow_mut();
+        let due = l
+            .get(key)
+            .is_none_or(|t| t.elapsed() > Duration::from_secs(5));
+        if due {
+            l.insert(key, Instant::now());
+        }
+        due
+    });
+    if !due {
+        return;
+    }
+    let pixels: Vec<u8> = canvas.pixels.iter().flatten().copied().collect();
+    let lit = canvas.pixels.iter().filter(|p| p[3] != 0).count();
+    let _ = image::save_buffer(
+        format!("{dir}/{key}.png"),
+        &pixels,
+        canvas.width as u32,
+        canvas.height as u32,
+        image::ColorType::Rgba8,
+    );
+    crate::log::line(
+        key,
+        &format!(
+            "[dump] {}x{} lit={} ppp={} size={:?} textures={}",
+            canvas.width,
+            canvas.height,
+            lit,
+            painter.ctx.pixels_per_point(),
+            painter.size,
+            painter.textures.describe()
+        ),
+    );
+}
+
 /// One pill: its window, its widget and its painter.
 struct Pill {
     kind: Kind,
@@ -419,6 +466,8 @@ impl Pill {
         let scale = scale_of(self.hwnd);
         let events = std::mem::take(&mut self.events);
         let (canvas, repaint) = self.painter.frame(&mut self.app, window, events, scale);
+        #[cfg(debug_assertions)]
+        debug_dump(self.kind, &canvas, &self.painter);
         if let Some(at) = repaint.and_then(|delay| Instant::now().checked_add(delay)) {
             let mut wake = self.wake.lock().unwrap();
             if wake.is_none_or(|t| at < t) {
@@ -615,8 +664,90 @@ mod tests {
     use super::*;
     use crate::shell;
 
+    /// The README banner's pills, drawn by the real pill code from fixed
+    /// sample data at 2x. Runs only with `BTW_BANNER_DIR=<folder>`, which
+    /// receives one transparent PNG per pill; `docs/make_banner.py` lays them
+    /// out. Needs network once, for the public Yr weather symbol.
+    #[test]
+    fn readme_banner() {
+        use crate::widgets::{
+            departures::DeparturesWidget, news::NewsWidget, now_playing::NowPlayingWidget,
+            usage::UsageWidget, weather::WeatherWidget, Widget,
+        };
+        use codezeno_usage_core::providers::ProviderId;
+        let Some(dir) = std::env::var_os("BTW_BANNER_DIR") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        let cfg: crate::config::SharedConfig =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::config::Config::default()));
+        let icon_url = WeatherWidget::sample_icon_url();
+        let icon = crate::http::agent()
+            .get(&icon_url)
+            .call()
+            .expect("weather symbol")
+            .body_mut()
+            .read_to_vec()
+            .expect("weather symbol bytes");
+        let pills: Vec<(Kind, Box<dyn Widget>)> = vec![
+            (Kind::Weather, Box::new(WeatherWidget::sample())),
+            (
+                Kind::Calendar,
+                Box::new(crate::widgets::calendar::CalendarWidget::sample()),
+            ),
+            (
+                Kind::Mail,
+                Box::new(crate::widgets::mail::MailWidget::sample(cfg.clone())),
+            ),
+            (Kind::Departures, Box::new(DeparturesWidget::sample())),
+            (Kind::News, Box::new(NewsWidget::sample(cfg.clone()))),
+            (Kind::NowPlaying, Box::new(NowPlayingWidget::sample())),
+            (
+                Kind::Usage(ProviderId::Claude),
+                Box::new(UsageWidget::sample(
+                    ProviderId::Claude,
+                    34.0,
+                    62.0,
+                    2 * 3600 + 15 * 60,
+                )),
+            ),
+            (
+                Kind::Usage(ProviderId::Codex),
+                Box::new(UsageWidget::sample(
+                    ProviderId::Codex,
+                    18.0,
+                    41.0,
+                    4 * 3600 + 5 * 60,
+                )),
+            ),
+        ];
+        for (kind, widget) in pills {
+            let mut app = WidgetApp::with_widget(kind, cfg.clone(), widget);
+            app.icons_mut().preload(&icon_url, &icon, 64);
+            let mut painter = Painter::new(app.size_hint());
+            let mut canvas = None;
+            // Fonts, the pill's own size and the icon settle over a few frames.
+            for _ in 0..8 {
+                canvas = Some(painter.frame(&mut app, None, Vec::new(), 2.0).0);
+            }
+            let canvas = canvas.unwrap();
+            let pixels: Vec<u8> = canvas.pixels.iter().flatten().copied().collect();
+            image::save_buffer(
+                dir.join(format!("{}.png", kind.key())),
+                &pixels,
+                canvas.width as u32,
+                canvas.height as u32,
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+        }
+    }
+
     #[test]
     fn layered_pills_keep_their_pixels_and_position_across_repeated_reparenting() {
+        let _windows = shell::tests::WINDOW_TESTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // Real layered windows, but disposable hosts: no Explorer, live
         // configuration, provider fetching or injected desktop input.
         assert!(register_class());

@@ -93,6 +93,123 @@ impl Default for MailCfg {
     }
 }
 
+/// A public transport stop from Entur's national stop register.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Stop {
+    /// `NSR:StopPlace:58366`
+    pub id: String,
+    pub name: String,
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeparturesCfg {
+    pub stop: Option<Stop>,
+    pub favorites: Vec<Stop>,
+    /// Line numbers to show, as on the bus (`31`, `5E`); empty shows every line.
+    pub lines: Vec<String>,
+    /// Shows only departures whose destination contains this text; empty
+    /// shows every direction.
+    pub direction: String,
+    pub refresh_secs: u64,
+    /// Read Statens vegvesen's road situations (DATEX II, public WFS) along
+    /// the route. Off, road traffic is reported as Unknown.
+    pub road_traffic: bool,
+    /// Road situations this close to the route count, in metres.
+    pub traffic_radius_m: u32,
+}
+
+impl Default for DeparturesCfg {
+    fn default() -> Self {
+        Self {
+            stop: None,
+            favorites: vec![],
+            lines: vec![],
+            direction: String::new(),
+            refresh_secs: 60,
+            road_traffic: true,
+            traffic_radius_m: 300,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FeedSource {
+    pub name: String,
+    pub url: String,
+    pub enabled: bool,
+}
+
+impl Default for FeedSource {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            url: String::new(),
+            enabled: true,
+        }
+    }
+}
+
+/// Built-in news sources. Each feed was reachable on 2026-11-14. Feeds are
+/// listed newest first, which is not the outlet's editorial ranking.
+pub const NEWS_PRESETS: [(&str, &str, bool); 9] = [
+    ("NRK", "https://www.nrk.no/toppsaker.rss", true),
+    ("VG", "https://www.vg.no/rss/feed", false),
+    ("Aftenposten", "https://www.aftenposten.no/rss", false),
+    ("E24", "https://e24.no/rss2/", false),
+    ("BBC News", "https://feeds.bbci.co.uk/news/rss.xml", true),
+    (
+        "The Guardian",
+        "https://www.theguardian.com/world/rss",
+        false,
+    ),
+    (
+        "Ars Technica",
+        "https://feeds.arstechnica.com/arstechnica/index",
+        false,
+    ),
+    ("The Verge", "https://www.theverge.com/rss/index.xml", false),
+    ("Hacker News", "https://hnrss.org/frontpage", false),
+];
+
+pub fn news_presets() -> Vec<FeedSource> {
+    NEWS_PRESETS
+        .iter()
+        .map(|(name, url, enabled)| FeedSource {
+            name: (*name).into(),
+            url: (*url).into(),
+            enabled: *enabled,
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NewsCfg {
+    /// Starts as the presets; sources can be switched off, removed or added.
+    pub feeds: Vec<FeedSource>,
+    pub refresh_secs: u64,
+    pub rotate_secs: u64,
+    pub pause_on_hover: bool,
+    /// Headlines older than this are left out, unless nothing newer exists.
+    pub max_age_hours: u64,
+}
+
+impl Default for NewsCfg {
+    fn default() -> Self {
+        Self {
+            feeds: news_presets(),
+            refresh_secs: 900,
+            rotate_secs: 10,
+            pause_on_hover: true,
+            max_age_hours: 24,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DockSide {
@@ -131,6 +248,15 @@ pub struct WidgetState {
     /// When docked: device name of the monitor whose taskbar holds the pill
     /// (`\\.\DISPLAY2`); `None` or an absent monitor means the primary bar.
     pub monitor: Option<String>,
+}
+
+impl WidgetState {
+    pub fn opt_in() -> Self {
+        Self {
+            enabled: false,
+            ..Default::default()
+        }
+    }
 }
 
 impl Default for WidgetState {
@@ -172,6 +298,11 @@ pub struct Config {
     pub weather_widget: WidgetState,
     pub calendar_widget: WidgetState,
     pub mail_widget: WidgetState,
+    pub departures: DeparturesCfg,
+    pub news: NewsCfg,
+    pub now_playing_widget: WidgetState,
+    pub departures_widget: WidgetState,
+    pub news_widget: WidgetState,
 }
 
 impl Default for Config {
@@ -199,6 +330,13 @@ impl Default for Config {
             weather_widget: WidgetState::default(),
             calendar_widget: WidgetState::default(),
             mail_widget: WidgetState::default(),
+            departures: DeparturesCfg::default(),
+            news: NewsCfg::default(),
+            // Widgets added after 1.0.1 are opt-in, so an update does not put
+            // new pills on anyone's taskbar.
+            now_playing_widget: WidgetState::opt_in(),
+            departures_widget: WidgetState::opt_in(),
+            news_widget: WidgetState::opt_in(),
         }
     }
 }
@@ -460,9 +598,17 @@ mod tests {
             assert!(keys.insert(kind.key()));
             assert_eq!(
                 kind.state(&cfg).enabled,
-                !matches!(kind, crate::app::Kind::Usage(_))
+                matches!(
+                    kind,
+                    crate::app::Kind::Weather | crate::app::Kind::Calendar | crate::app::Kind::Mail
+                )
             );
         }
+        // A file from 1.0.1 has none of the newer widgets: they stay off.
+        let old: Config = serde_json::from_str(r#"{"mail_widget":{"enabled":true}}"#).unwrap();
+        assert!(!crate::app::Kind::News.state(&old).enabled);
+        assert!(!crate::app::Kind::Departures.state(&old).enabled);
+        assert_eq!(old.news.feeds.len(), NEWS_PRESETS.len());
         let cfg: Config = serde_json::from_str(r#"{"usage_widgets":{}}"#).unwrap();
         assert!(
             !crate::app::Kind::Usage(codezeno_usage_core::providers::ProviderId::Claude)

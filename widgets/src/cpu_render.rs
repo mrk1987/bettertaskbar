@@ -57,6 +57,18 @@ impl Textures {
         }
     }
 
+    /// The loaded textures and their sizes, for debug logs.
+    #[cfg(debug_assertions)]
+    pub fn describe(&self) -> String {
+        let mut all: Vec<String> = self
+            .0
+            .iter()
+            .map(|(id, t)| format!("{id:?}:{:?}", t.size))
+            .collect();
+        all.sort();
+        all.join(",")
+    }
+
     /// Drop freed textures and mark the delta handled. Call after painting.
     pub fn free(&mut self, mut delta: TexturesDelta) {
         for id in &delta.free {

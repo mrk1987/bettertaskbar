@@ -87,6 +87,11 @@ Two things were ours and are fixed:
   and usage widgets measured 54 to 56 MiB without this, on a machine where
   calendar and mail use local bridges; a public CalDAV or IMAP server may
   behave like the weather API did.
+- **Next Departure and News fetch in the shared process**, not in an
+  isolated child: their hosts (Entur, Vegvesen, any feed URL) are not in the
+  `--http-get` allow-list, and the usage widgets already make HTTPS requests
+  in the same process. Their effect on the 20 MiB figure above was not
+  measured when they were added (2026-11-14).
 - **An idle pill repaints once a second**, not five times. A repaint is also
   what takes in new data and runs the dock check. Input, a config change and
   a finished icon download repaint at once.

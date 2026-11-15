@@ -310,9 +310,48 @@ fn check(what: &str) -> i32 {
             )
         }),
         "taskbar" => Ok(check_taskbar()),
+        "departures" => widgets::departures::fetch(&cfg.departures).map(|board| {
+            let now = chrono::Utc::now();
+            let mut out = format!(
+                "{}: traffic {} ({})",
+                board.stop,
+                board.traffic.label(),
+                board.traffic_reason
+            );
+            for d in board.departures.iter().take(8) {
+                out.push_str(&format!(
+                    "\n{} to {}{}",
+                    widgets::departures::headline(d, now),
+                    d.destination,
+                    if d.realtime { "" } else { " (timetable)" }
+                ));
+            }
+            out
+        }),
+        "now-playing" => widgets::now_playing::read_once().map(|track| match track {
+            Some(t) => format!("{} — {} ({:?}) from {}", t.title, t.artist, t.state, t.app),
+            None => "Nothing is reporting media playback.".into(),
+        }),
+        "news" => widgets::news::fetch(&cfg.news).map(|h| {
+            let now = chrono::Utc::now();
+            let mut out = format!("{} headlines", h.items.len());
+            if !h.failed.is_empty() {
+                out.push_str(&format!(", unreadable: {}", h.failed.join(", ")));
+            }
+            for item in h.items.iter().take(12) {
+                out.push_str(&format!(
+                    "\n[{} · {}] {}\n    {}",
+                    item.source,
+                    widgets::news::age(item.published, now),
+                    item.title,
+                    item.link
+                ));
+            }
+            out
+        }),
         "docking" => magnet::diagnostics(&cfg),
         other => Err(format!(
-            "unknown check \"{other}\"; use calendar, mail or taskbar"
+            "unknown check \"{other}\"; use calendar, mail, departures, news, now-playing or taskbar"
         )),
     };
     match outcome {

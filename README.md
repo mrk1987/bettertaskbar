@@ -7,7 +7,7 @@ so they match whatever color or effect your taskbar has.
 
 [![CI](https://github.com/mrk1987/bettertaskbar/actions/workflows/ci.yml/badge.svg)](https://github.com/mrk1987/bettertaskbar/actions/workflows/ci.yml)
 
-![Three widgets on the taskbar: weather, next calendar event, unread mail](docs/taskbar.png)
+![The widgets side by side on a taskbar: weather with rain onset, next calendar event, unread mail, next bus with traffic level, a news headline, the playing track with play/pause and next buttons, and Claude and Codex usage](docs/banner.png)
 
 If you, like me, use Proton Mail Bridge and my other project
 [iOxide](https://github.com/mrk1987/iOxide), want a better weather widget with
@@ -22,12 +22,16 @@ just the thing for you!
 | [Weather](docs/weather.md) | Yr symbol, the next 24 hours' high and low, precipitation | Opens the forecast on yr.no |
 | [Calendar](docs/calendar.md) | What is on now and what is next, from any CalDAV server | Opens Proton Calendar |
 | [Mail](docs/mail.md) | Unread count and the newest unread subjects, rotating | Opens Proton Mail |
+| [Now Playing](docs/now-playing.md) | Track, artist and playback state from Windows' media controls | Brings up the player |
+| [Next Departure](docs/departures.md) | Next bus, tram, metro, train or boat from a saved stop, and a traffic level for the route (Norway, Entur) | Reads departures again |
+| [News](docs/news.md) | Rotating headlines with source and age, from feeds you choose | Opens the headline on screen |
 | [Usage](docs/dashboard.md) | Session and weekly use of Claude Code, Codex, Antigravity, OpenCode Go, Cursor, Grok Build or GitHub Copilot | Reads the usage again |
 
 Weather works out of the box. Calendar and mail need an account: they were
 built for Proton through iOxide and Proton Mail Bridge, but any CalDAV or IMAP
 server works. Usage widgets are off by default and reuse the sign-in of each
-tool's own app or CLI.
+tool's own app or CLI. Now Playing, Next Departure and News are off by default
+too; switch them on under **Widgets** in the dashboard.
 
 Double-click actions are configurable per widget: open a URL, refresh its
 data, or launch an app. Set the URL or app in the widget settings, then switch
@@ -85,8 +89,10 @@ Everything is saved in `%APPDATA%\BetterTaskbar\widgets.json`. See the
 ## Privacy
 
 - No telemetry. The widgets talk only to MET Norway and Yr (weather),
-  Open-Meteo (place search), the CalDAV and IMAP servers you configure, and the
-  usage APIs of the providers you switch on.
+  Open-Meteo (place search), the CalDAV and IMAP servers you configure, the
+  usage APIs of the providers you switch on, and, when those widgets are on,
+  Entur and Statens vegvesen (departures and road situations) and the news
+  feeds you choose. Now Playing reads Windows' media session locally.
 - Mail is opened read-only; nothing is marked as read.
 - Calendar and mail passwords are stored as plain text in `widgets.json`.
   Keep that file private. Theme exports never include settings or passwords.
@@ -116,6 +122,9 @@ program has no console of its own):
 ```sh
 bettertaskbar-widgets.exe --check=calendar | more
 bettertaskbar-widgets.exe --check=mail | more
+bettertaskbar-widgets.exe --check=departures | more
+bettertaskbar-widgets.exe --check=news | more
+bettertaskbar-widgets.exe --check=now-playing | more
 bettertaskbar-widgets.exe --check=taskbar | more
 bettertaskbar-widgets.exe --check=docking | more
 ```

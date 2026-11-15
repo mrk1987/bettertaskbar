@@ -3,10 +3,35 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.1.0 - 2026-11-15
 
 ### Added
 
+- Now Playing widget: track, artist and playback state from Windows' media
+  session, with play/pause and next-track buttons (through the same media
+  session, falling back to the keyboard's media keys). Double-click brings up
+  the player.
+- Next Departure widget: the next departure from a saved stop (Entur), with
+  line and direction filters, a live countdown, delays, an icon for bus, tram,
+  metro, train or boat, and a None / Low / Medium / High traffic level from
+  Statens vegvesen road situations along the route and Entur disruptions.
+  Unknown when road data is missing or stale.
+- News widget: rotating headlines from built-in Norwegian, international and
+  tech feeds or any RSS/Atom feed, with source, age, de-duplication,
+  pause on hover and an offline marker.
+- Double-click action **Open current item**: opens the headline on screen
+  (News) or the media player (Now Playing). The headline holds still while
+  it is clicked.
+- Weather shows when rain, sleet or snow starts within six hours
+  (`Rain 40m`, `Rain now`), or `Dry 6h`, in place of the day's total.
+- Text too long for its pill scrolls to show the rest, snaps back and
+  starts again after a pause. News and Mail move on to the next headline or
+  subject only after the current one has scrolled past once.
+- Mail and Calendar are compact pills of the same width, just wide enough
+  for "No unread mail"; longer text scrolls.
+- The tray menu lists every widget, with the AI usage providers in a
+  submenu, and checks the placement all enabled widgets share.
+- `--check=departures`, `--check=news` and `--check=now-playing`.
 - Per-widget double-click actions: open a configurable URL, refresh data,
   or launch a chosen application. Configure targets in the dashboard and
   switch actions from the widget's right-click menu. Existing defaults
@@ -14,6 +39,12 @@ Notable changes to BetterTaskbar. Versions follow
 
 ### Fixed
 
+- A pill dragged onto the taskbar could stay blank while still taking
+  clicks: its layered surface is now re-bound after each move into a
+  taskbar, as Claude-Code-Usage-Monitor does.
+- Docked pills keep the order they are placed in on each side of the
+  taskbar, also after a restart, instead of a fixed order.
+- The Usage page no longer shows a Settings button that led to itself.
 - Enabled Windows clipboard access so dashboard text fields support pasting
   from other applications, as well as copying and cutting.
 

@@ -90,18 +90,56 @@ pub(crate) fn proton_tile(ui: &mut egui::Ui, kind: &str) {
     }
 }
 
-pub(crate) fn two_lines(ui: &mut egui::Ui, a: &str, b: &str, width: f32) {
+/// Two lines of text at most `width` wide. Text too long for it scrolls.
+/// Returns whether both lines have been shown in full once.
+pub(crate) fn two_lines(ui: &mut egui::Ui, a: &str, b: &str, width: f32) -> bool {
     ui.vertical(|ui| {
         ui.set_max_width(width);
-        ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
-        ui.add(egui::Label::new(egui::RichText::new(a).size(12.0)).truncate());
-        ui.add(egui::Label::new(egui::RichText::new(b).size(11.0).weak()).truncate());
-    });
+        lines(ui, a, b)
+    })
+    .inner
+}
+
+/// Two lines of text exactly `width` wide, whatever they say, so the pill
+/// keeps one size. Text too long for it scrolls.
+pub(crate) fn two_lines_fixed(ui: &mut egui::Ui, a: &str, b: &str, width: f32) -> bool {
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        lines(ui, a, b)
+    })
+    .inner
+}
+
+fn lines(ui: &mut egui::Ui, a: &str, b: &str) -> bool {
+    ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
+    // Too long for the pill: scroll, so the whole text can be read.
+    let first = crate::widgets::marquee::line(ui, egui::RichText::new(a).size(12.0), "first");
+    let second =
+        crate::widgets::marquee::line(ui, egui::RichText::new(b).size(11.0).weak(), "second");
+    first && second
+}
+
+/// The text width of the compact Mail and Calendar pills: just room for
+/// "No unread mail", so the two pills are the same size and anything longer
+/// scrolls.
+pub(crate) fn compact_width(ui: &egui::Ui) -> f32 {
+    ui.ctx()
+        .fonts_mut(|f| {
+            f.layout_no_wrap(
+                "No unread mail".into(),
+                egui::FontId::proportional(12.0),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+        })
+        .ceil()
 }
 
 impl Widget for CalendarWidget {
+    /// The minimum; the pill is as wide as its tile and `compact_width`.
     fn size(&self) -> (f32, f32) {
-        (230.0, 48.0)
+        (48.0, 48.0)
     }
 
     fn refresh(&mut self) {
@@ -169,7 +207,24 @@ impl Widget for CalendarWidget {
                 (None, None, Some(next)) => (next, "Free now".into()),
                 (None, None, None) => ("No upcoming events".into(), "Next 14 days".into()),
             };
-            two_lines(ui, &first, &second, 170.0);
+            two_lines_fixed(ui, &first, &second, compact_width(ui));
         });
+    }
+}
+
+#[cfg(test)]
+impl CalendarWidget {
+    /// Fixed sample data for the README banner (`single.rs`, `readme_banner`):
+    /// no thread, no network, nothing from the user's own accounts.
+    pub fn sample() -> Self {
+        Self {
+            refresh: Default::default(),
+            rx: mpsc::channel().1,
+            lines: Some(Lines {
+                now: None,
+                next: Some("Next: Lunch · 12:00".into()),
+            }),
+            notice: None,
+        }
     }
 }

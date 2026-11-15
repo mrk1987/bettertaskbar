@@ -31,6 +31,7 @@ const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
 const WS_EX_TOPMOST: u32 = 0x0000_0008;
 const WS_EX_NOACTIVATE: u32 = 0x0800_0000;
 const WS_EX_APPWINDOW: u32 = 0x0004_0000;
+const WS_EX_LAYERED: u32 = 0x0008_0000;
 
 const FRAME_BITS: u32 = WS_CAPTION
     | WS_THICKFRAME
@@ -119,6 +120,16 @@ fn ex_style(hwnd: HWND) -> u32 {
 
 fn set_ex_style(hwnd: HWND, value: u32) {
     unsafe { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, value as isize) };
+}
+
+/// Before each present: a style change elsewhere must not leave the pill
+/// without WS_EX_LAYERED, or UpdateLayeredWindow has no surface to fill.
+/// Claude-Code-Usage-Monitor does the same (positioning.rs, ensure_layered_window).
+pub fn ensure_layered(hwnd: HWND) {
+    let ex = ex_style(hwnd);
+    if ex & WS_EX_LAYERED == 0 {
+        set_ex_style(hwnd, ex | WS_EX_LAYERED);
+    }
 }
 
 pub fn screen_rect(hwnd: HWND) -> RECT {
@@ -239,6 +250,20 @@ pub fn embed(hwnd: HWND, host: HWND) -> bool {
                 // and let the next docking tick try the new taskbar again.
                 make_popup(hwnd);
                 return false;
+            }
+            // Windows 11 can leave a re-parented layered window's surface
+            // beneath the taskbar's DirectComposition visual: the pill is
+            // there and takes clicks but shows nothing. Turning WS_EX_LAYERED
+            // off and on again binds a new surface; the frame that called
+            // this presents fresh pixels into it. Only after a real parent
+            // change, as Claude-Code-Usage-Monitor does
+            // (native_interop.rs, embed_as_child).
+            if GetParent(hwnd).ok() == Some(host) {
+                let ex = ex_style(hwnd);
+                if ex & WS_EX_LAYERED != 0 {
+                    set_ex_style(hwnd, ex & !WS_EX_LAYERED);
+                    set_ex_style(hwnd, ex);
+                }
             }
         }
         let mut pts = [POINT {
@@ -656,11 +681,17 @@ pub fn try_open_url(url: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Held by tests that create windows. The stale-handle check below needs
+    /// a destroyed handle that no window made meanwhile has taken over, and
+    /// window handles are reused across threads.
+    pub static WINDOW_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn hosted_window_follows_its_host_and_failed_embedding_restores_popup() {
+        let _windows = WINDOW_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         // Exercise only disposable windows owned by this test, never Explorer.
         unsafe {
             let create = || {

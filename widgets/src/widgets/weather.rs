@@ -29,6 +29,95 @@ pub struct WeatherData {
     pub lo: f32,
     pub precip: f32,
     pub symbol: String,
+    /// Every wet hour in the hourly part of the forecast. The hint is worked
+    /// out from these at drawing time, so it follows the clock between
+    /// fetches: "Rain now" ends when the wet hour does.
+    pub wet_hours: Vec<Onset>,
+}
+
+impl WeatherData {
+    pub fn onset(&self, now: chrono::DateTime<chrono::Utc>) -> Option<&Onset> {
+        current_onset(&self.wet_hours, now)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Onset {
+    /// "Rain", "Sleet" or "Snow".
+    pub kind: &'static str,
+    /// Start of the first wet hour (may be in the past: it is wet now).
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+/// An hour counts as wet from this much precipitation, in mm.
+const WET_MM: f64 = 0.1;
+/// Onsets further ahead than this are not announced.
+const ONSET_WINDOW_HOURS: i64 = 6;
+
+/// The wet hours in met.no's hourly series, in order.
+fn wet_hours(series: &[Value]) -> Vec<Onset> {
+    let mut out = Vec::new();
+    for entry in series {
+        let Some(at) = entry["time"]
+            .as_str()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| t.with_timezone(&chrono::Utc))
+        else {
+            continue;
+        };
+        let next = &entry["data"]["next_1_hours"];
+        // Hourly steps end after about two days; there is nothing more to read.
+        let Some(amount) = next["details"]["precipitation_amount"].as_f64() else {
+            break;
+        };
+        if amount >= WET_MM {
+            let symbol = next["summary"]["symbol_code"].as_str().unwrap_or("");
+            let kind = if symbol.contains("snow") {
+                "Snow"
+            } else if symbol.contains("sleet") {
+                "Sleet"
+            } else {
+                "Rain"
+            };
+            out.push(Onset { kind, at });
+        }
+    }
+    out
+}
+
+/// The wet hour to announce at `now`: the first one not yet over, if it
+/// starts within the window.
+fn current_onset(wet: &[Onset], now: chrono::DateTime<chrono::Utc>) -> Option<&Onset> {
+    wet.iter()
+        .find(|o| o.at + chrono::Duration::hours(1) > now)
+        .filter(|o| o.at - now <= chrono::Duration::hours(ONSET_WINDOW_HOURS))
+}
+
+#[cfg(test)]
+fn find_onset(series: &[Value], now: chrono::DateTime<chrono::Utc>) -> Option<Onset> {
+    current_onset(&wet_hours(series), now).cloned()
+}
+
+/// The hint for the pill's second line: "Rain now", "Rain 40m", "Snow 3h".
+/// The pill's second line: when rain, sleet or snow starts within the
+/// window ("Rain 40m"), or that none is due ("Dry 6h"). Always shown, so the
+/// pill says what the next hours bring rather than the day's total.
+fn rain_line(d: &WeatherData, now: chrono::DateTime<chrono::Utc>) -> String {
+    match d.onset(now) {
+        Some(o) => onset_hint(o, now),
+        None => format!("Dry {ONSET_WINDOW_HOURS}h"),
+    }
+}
+
+pub fn onset_hint(onset: &Onset, now: chrono::DateTime<chrono::Utc>) -> String {
+    let mins = (onset.at - now).num_minutes();
+    if mins <= 0 {
+        format!("{} now", onset.kind)
+    } else if mins < 60 {
+        format!("{} {mins}m", onset.kind)
+    } else {
+        format!("{} {}h", onset.kind, (mins + 30) / 60)
+    }
 }
 
 pub struct WeatherWidget {
@@ -124,6 +213,7 @@ fn fetch(place: &Place) -> Option<WeatherData> {
         lo,
         precip,
         symbol,
+        wet_hours: wet_hours(series),
     })
 }
 
@@ -262,6 +352,7 @@ impl Widget for WeatherWidget {
                 ("high", format!("{:.0}", d.hi)),
                 ("low", format!("{:.0}", d.lo)),
                 ("precip", d.precip.to_string()),
+                ("rain_hint", rain_line(d, chrono::Utc::now())),
                 ("icon", symbol_svg(&d.symbol)),
             ] {
                 values.insert(key.into(), value);
@@ -308,10 +399,11 @@ impl Widget for WeatherWidget {
                                     .size(12.0),
                             );
                         });
-                        ui.label(
-                            egui::RichText::new(format!("{:.0}mm", d.precip))
-                                .color(COLD)
-                                .size(11.0),
+                        let second = rain_line(d, chrono::Utc::now());
+                        // One line; the pill grows to fit it.
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(second).color(COLD).size(11.0))
+                                .extend(),
                         );
                     }
                     None => {
@@ -325,8 +417,115 @@ impl Widget for WeatherWidget {
 }
 
 #[cfg(test)]
+impl WeatherWidget {
+    const SAMPLE_SYMBOL: &'static str = "partlycloudy_day";
+
+    /// Fixed sample data for the README banner (`single.rs`, `readme_banner`):
+    /// no thread, no network, nothing from the user's own accounts.
+    pub fn sample() -> Self {
+        let soon = chrono::Utc::now() + chrono::Duration::seconds(40 * 60 + 30);
+        Self {
+            refresh: Default::default(),
+            rx: mpsc::channel().1,
+            latest: Some(WeatherData {
+                hi: 12.0,
+                lo: 6.0,
+                precip: 1.2,
+                symbol: Self::SAMPLE_SYMBOL.into(),
+                wet_hours: vec![Onset {
+                    kind: "Rain",
+                    at: soon,
+                }],
+            }),
+        }
+    }
+
+    /// Where the sample's weather symbol is downloaded from.
+    pub fn sample_icon_url() -> String {
+        symbol_svg(Self::SAMPLE_SYMBOL)
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use super::{parse_places, symbol_svg};
+    use super::{current_onset, find_onset, onset_hint, parse_places, symbol_svg, wet_hours};
+
+    #[test]
+    fn the_second_line_says_dry_when_nothing_is_due() {
+        let at = |h: u32| {
+            chrono::DateTime::parse_from_rfc3339(&format!("2026-11-14T{h:02}:00:00Z"))
+                .unwrap()
+                .to_utc()
+        };
+        let mut d = super::WeatherData {
+            hi: 8.0,
+            lo: 5.0,
+            precip: 3.0,
+            symbol: String::new(),
+            wet_hours: vec![super::Onset {
+                kind: "Rain",
+                at: at(20),
+            }],
+        };
+        assert_eq!(super::rain_line(&d, at(12)), "Dry 6h");
+        assert_eq!(super::rain_line(&d, at(16)), "Rain 4h");
+        d.wet_hours.clear();
+        assert_eq!(super::rain_line(&d, at(16)), "Dry 6h");
+    }
+
+    #[test]
+    fn rain_onset_is_announced_within_six_hours() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-14T13:20:00Z")
+            .unwrap()
+            .to_utc();
+        let hour = |h: u32, mm: f64, sym: &str| {
+            serde_json::json!({"time": format!("2026-11-14T{h:02}:00:00Z"),
+                "data": {"next_1_hours": {"summary": {"symbol_code": sym},
+                                          "details": {"precipitation_amount": mm}}}})
+        };
+        let dry = |h| hour(h, 0.0, "cloudy");
+        let series = vec![hour(12, 3.0, "rain"), dry(13), hour(14, 0.4, "lightrain")];
+        let onset = find_onset(&series, now).unwrap();
+        assert_eq!(onset_hint(&onset, now), "Rain 40m");
+        let series = vec![hour(13, 0.2, "lightsnow"), dry(14)];
+        assert_eq!(
+            onset_hint(&find_onset(&series, now).unwrap(), now),
+            "Snow now"
+        );
+        let series = vec![dry(13), dry(14), hour(16, 1.0, "sleet")];
+        assert_eq!(
+            onset_hint(&find_onset(&series, now).unwrap(), now),
+            "Sleet 3h"
+        );
+        let series = vec![
+            dry(13),
+            dry(14),
+            dry(15),
+            dry(16),
+            dry(17),
+            dry(18),
+            dry(19),
+            hour(20, 2.0, "rain"),
+        ];
+        assert_eq!(find_onset(&series, now), None);
+        // Fetched while it rained 13:00-14:00 and dry after: once 14:00 has
+        // passed, the same data no longer says "Rain now".
+        let wet = wet_hours(&[hour(13, 1.0, "rain"), dry(14), hour(18, 1.0, "rain")]);
+        let at = |h: u32, m: u32| {
+            chrono::DateTime::parse_from_rfc3339(&format!("2026-11-14T{h:02}:{m:02}:00Z"))
+                .unwrap()
+                .to_utc()
+        };
+        assert_eq!(
+            onset_hint(current_onset(&wet, at(13, 50)).unwrap(), at(13, 50)),
+            "Rain now"
+        );
+        assert_eq!(
+            onset_hint(current_onset(&wet, at(14, 5)).unwrap(), at(14, 5)),
+            "Rain 4h"
+        );
+        assert_eq!(current_onset(&wet[..1], at(14, 5)), None);
+    }
 
     #[test]
     fn place_search_handles_empty_results_and_disambiguates_names() {

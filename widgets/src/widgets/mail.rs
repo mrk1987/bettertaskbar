@@ -8,7 +8,7 @@ use eframe::egui;
 use crate::config::{Config, MailCfg, SharedConfig};
 use crate::icons::IconCache;
 use crate::imap::Unread;
-use crate::widgets::calendar::{proton_tile, two_lines};
+use crate::widgets::calendar::{compact_width, proton_tile, two_lines_fixed};
 use crate::widgets::{Update, Widget};
 
 pub struct MailWidget {
@@ -19,6 +19,8 @@ pub struct MailWidget {
     notice: Option<String>,
     index: usize,
     last_rotate: Instant,
+    /// The subject on screen has been shown in full once.
+    shown: bool,
 }
 
 fn pick(c: &Config) -> (MailCfg, u64, bool) {
@@ -46,13 +48,15 @@ impl MailWidget {
             notice: Some("Loading…".into()),
             index: 0,
             last_rotate: Instant::now(),
+            shown: true,
         }
     }
 }
 
 impl Widget for MailWidget {
+    /// The minimum; the pill is as wide as its tile and `compact_width`.
     fn size(&self) -> (f32, f32) {
-        (230.0, 48.0)
+        (48.0, 48.0)
     }
 
     fn refresh(&mut self) {
@@ -102,7 +106,8 @@ impl Widget for MailWidget {
         }
         let rotate = self.cfg.lock().unwrap().mail.rotate_secs.max(1);
         let subjects = self.unread.as_ref().map(|u| u.subjects.len()).unwrap_or(0);
-        if subjects > 0 && self.last_rotate.elapsed() >= Duration::from_secs(rotate) {
+        // A subject too long for the pill scrolls past once before the next.
+        if subjects > 0 && self.shown && self.last_rotate.elapsed() >= Duration::from_secs(rotate) {
             self.index = (self.index + 1) % subjects;
             self.last_rotate = Instant::now();
         }
@@ -126,7 +131,28 @@ impl Widget for MailWidget {
                 ),
                 (None, _) => ("No unread mail".into(), "Inbox".into()),
             };
-            two_lines(ui, &first, &second, 170.0);
+            self.shown = two_lines_fixed(ui, &first, &second, compact_width(ui));
         });
+    }
+}
+
+#[cfg(test)]
+impl MailWidget {
+    /// Fixed sample data for the README banner (`single.rs`, `readme_banner`):
+    /// no thread, no network, nothing from the user's own accounts.
+    pub fn sample(cfg: SharedConfig) -> Self {
+        Self {
+            refresh: Default::default(),
+            cfg,
+            rx: mpsc::channel().1,
+            unread: Some(Unread {
+                count: 0,
+                subjects: Vec::new(),
+            }),
+            notice: None,
+            index: 0,
+            last_rotate: Instant::now(),
+            shown: true,
+        }
     }
 }

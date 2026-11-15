@@ -94,3 +94,12 @@ fn raster(bytes: &[u8], px: u32) -> Option<egui::ColorImage> {
         &out,
     ))
 }
+
+#[cfg(test)]
+impl IconCache {
+    /// Hand the cache an icon's bytes, as if it had been downloaded.
+    pub fn preload(&mut self, url: &str, bytes: &[u8], px: u32) {
+        self.slots.insert(url.to_owned(), Slot::Loading);
+        let _ = self.tx.send((url.to_owned(), raster(bytes, px)));
+    }
+}
