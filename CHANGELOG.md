@@ -10,6 +10,9 @@ Notable changes to BetterTaskbar. Versions follow
 - Next Departure shows just the line and countdown (`31 · 6 min`); the icon
   already shows the mode. The pill is compact and keeps one width; longer
   text scrolls.
+- The Next Departure direction filter takes several destinations, comma
+  separated, for lines that end at different stops in one direction. The
+  dashboard explains what to enter.
 
 ## 1.1.0 - 2026-11-15
 

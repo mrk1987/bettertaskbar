@@ -26,8 +26,11 @@ Open the dashboard's **Next Departure** page:
   right-click **Stop** menu.
 - **Lines:** line numbers to show, comma separated (`31, 37`). Blank shows
   every line.
-- **Direction:** shows only departures whose destination contains this text
-  (`Tonsenhagen`). Blank shows every direction.
+- **Direction:** shows only departures whose final destination, as written on
+  the front of the vehicle, contains one of these, comma separated and not
+  case-sensitive (`Tonsenhagen`). A line that ends at several stops in one
+  direction needs each of them (`Sentrum, Helsfyr`). Blank shows every
+  direction.
 - **Traffic:** whether to read road situations, and how far from the route
   they count (300 m by default).
 

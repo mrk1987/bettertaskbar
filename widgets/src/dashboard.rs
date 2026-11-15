@@ -834,18 +834,18 @@ impl Dashboard {
                     .filter(|l| !l.is_empty())
                     .collect();
             }
-            ui.label("Direction");
+            ui.label("Direction (comma separated, blank for all)");
             ui.add(
                 egui::TextEdit::singleline(&mut self.draft.departures.direction)
-                    .hint_text("Sentrum")
+                    .hint_text("Sentrum, Helsfyr")
                     .desired_width(240.0),
             );
             ui.colored_label(
                 style::MUTED,
-                "Shows only departures whose destination, as written on the front of the \
-                 bus or train, contains this text. Not case-sensitive. Use it to see only \
-                 one direction of a line, for example \"Sentrum\" for trips into town. \
-                 Leave it blank for every direction.",
+                "Shows only departures whose final destination, as written on the front \
+                 of the bus or train, contains one of these. Not case-sensitive, and part \
+                 of a name is enough. Use it to see one direction of a line; list every \
+                 end stop in that direction when the line has several.",
             );
             ui.horizontal(|ui| {
                 ui.label("Refresh (seconds)");

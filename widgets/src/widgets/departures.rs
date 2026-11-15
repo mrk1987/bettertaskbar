@@ -277,7 +277,13 @@ pub fn parse_departures(json: &Value, cfg: &DeparturesCfg, now: DateTime<Utc>) -
         .map(|l| l.trim().to_lowercase())
         .filter(|l| !l.is_empty())
         .collect();
-    let direction = cfg.direction.trim().to_lowercase();
+    // Comma separated: a line can end at several stops in one direction.
+    let directions: Vec<String> = cfg
+        .direction
+        .split(',')
+        .map(|d| d.trim().to_lowercase())
+        .filter(|d| !d.is_empty())
+        .collect();
     let mut out: Vec<Departure> = json["data"]["stopPlace"]["estimatedCalls"]
         .as_array()
         .map(|calls| {
@@ -293,7 +299,8 @@ pub fn parse_departures(json: &Value, cfg: &DeparturesCfg, now: DateTime<Utc>) -
                     if !lines.is_empty() && !lines.contains(&code.to_lowercase()) {
                         return None;
                     }
-                    if !direction.is_empty() && !destination.to_lowercase().contains(&direction) {
+                    let lower = destination.to_lowercase();
+                    if !directions.is_empty() && !directions.iter().any(|d| lower.contains(d)) {
                         return None;
                     }
                     let aimed = parse_time(&call["aimedDepartureTime"])?;
@@ -1113,6 +1120,9 @@ mod tests {
         assert_eq!(filtered[0].mode, Mode::Metro);
         only.direction = "Helsfyr".into();
         assert!(parse_departures(&board_json(), &only, now).is_empty());
+        // A line that ends at several stops in one direction: any of them.
+        only.direction = "Helsfyr, berg ,".into();
+        assert_eq!(parse_departures(&board_json(), &only, now).len(), 1);
     }
 
     #[test]

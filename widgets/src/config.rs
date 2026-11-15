@@ -110,8 +110,8 @@ pub struct DeparturesCfg {
     pub favorites: Vec<Stop>,
     /// Line numbers to show, as on the bus (`31`, `5E`); empty shows every line.
     pub lines: Vec<String>,
-    /// Shows only departures whose destination contains this text; empty
-    /// shows every direction.
+    /// Comma separated: shows only departures whose final destination
+    /// contains one of these, ignoring case; empty shows every direction.
     pub direction: String,
     pub refresh_secs: u64,
     /// Read Statens vegvesen's road situations (DATEX II, public WFS) along
