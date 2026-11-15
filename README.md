@@ -7,6 +7,8 @@ coding plan is left. They have no background of their own, so they take on
 whatever color or effect your taskbar has.
 
 [![CI](https://github.com/mrk1987/bettertaskbar/actions/workflows/ci.yml/badge.svg)](https://github.com/mrk1987/bettertaskbar/actions/workflows/ci.yml)
+[![Windows 10 | 11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)](#install)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ![The widgets side by side on a taskbar: weather with rain onset, next calendar event, unread mail, next bus with traffic level, a news headline, the playing track with play/pause and next buttons, and Claude and Codex usage](docs/banner.png)
 
