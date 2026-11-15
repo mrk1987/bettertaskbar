@@ -320,7 +320,8 @@ fn check(what: &str) -> i32 {
             );
             for d in board.departures.iter().take(8) {
                 out.push_str(&format!(
-                    "\n{} to {}{}",
+                    "\n{} {} to {}{}",
+                    d.mode.label(),
                     widgets::departures::headline(d, now),
                     d.destination,
                     if d.realtime { "" } else { " (timetable)" }

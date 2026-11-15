@@ -3,15 +3,17 @@
 The next departure from a stop you choose, on two lines:
 
 ```
-Bus 31 · 6 min
+31 · 6 min
 Traffic: High
 ```
 
 The icon shows the transport mode of that departure: bus, tram, metro, train
-or boat. A stop served by several modes changes icon as the next departure
-changes. The countdown runs live between refreshes. A delay of two minutes or
-more is added after the countdown (`6 min +3`). A departure an hour or more
-away shows its clock time. Cancelled departures say so.
+or boat, so the text gives only the line. A stop served by several modes
+changes icon as the next departure changes. The countdown runs live between
+refreshes. A delay of two minutes or more is added after the countdown
+(`6 min +3`). A departure an hour or more away shows its clock time. Cancelled
+departures say so. The pill keeps one width; a longer line, such as one with a
+delay, scrolls.
 
 Off by default. Switch it on under **Widgets** in the dashboard.
 

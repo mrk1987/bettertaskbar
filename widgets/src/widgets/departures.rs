@@ -24,7 +24,7 @@ use serde_json::{json, Value};
 
 use crate::config::{Config, DeparturesCfg, SharedConfig, Stop};
 use crate::icons::IconCache;
-use crate::widgets::calendar::two_lines;
+use crate::widgets::calendar::two_lines_fixed;
 use crate::widgets::{Update, Widget};
 
 const JOURNEY_PLANNER: &str = "https://api.entur.io/journey-planner/v3/graphql";
@@ -667,11 +667,33 @@ pub fn countdown(expected: DateTime<Utc>, now: DateTime<Utc>) -> String {
 }
 
 /// Line 1 for a departure, e.g. `Bus 31 · 6 min +3`.
+/// The pill's text width: room for its usual content, "Traffic: Unknown"
+/// under a two-digit countdown, so the pill keeps one size. Delays, long line
+/// names and notices scroll.
+fn text_width(ui: &egui::Ui) -> f32 {
+    let measure = |text: &str, size: f32| {
+        ui.ctx().fonts_mut(|f| {
+            f.layout_no_wrap(
+                text.into(),
+                egui::FontId::proportional(size),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+        })
+    };
+    measure("Traffic: Unknown", 11.0)
+        .max(measure("31 · 10 min", 12.0))
+        .ceil()
+}
+
+/// Line one of the pill, e.g. "31 · 6 min". The tile beside it shows the
+/// mode, so the mode is named only for a departure without a line number.
 pub fn headline(d: &Departure, now: DateTime<Utc>) -> String {
     let name = if d.line.is_empty() {
         d.mode.label().to_owned()
     } else {
-        format!("{} {}", d.mode.label(), d.line)
+        d.line.clone()
     };
     if d.cancelled {
         return format!("{name} · cancelled");
@@ -849,8 +871,9 @@ fn mode_tile(ui: &mut egui::Ui, mode: Option<Mode>) {
 }
 
 impl Widget for DeparturesWidget {
+    /// The minimum; the pill is as wide as its tile and `text_width`.
     fn size(&self) -> (f32, f32) {
-        (200.0, 48.0)
+        (48.0, 48.0)
     }
 
     fn refresh(&mut self) {
@@ -912,7 +935,7 @@ impl Widget for DeparturesWidget {
             if self.notice.is_none() && mode.is_some() {
                 let level = self.traffic();
                 ui.vertical(|ui| {
-                    ui.set_max_width(150.0);
+                    ui.set_width(text_width(ui));
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                     crate::widgets::marquee::line(
                         ui,
@@ -936,7 +959,7 @@ impl Widget for DeparturesWidget {
                     ui.add(egui::Label::new(job).truncate());
                 });
             } else {
-                two_lines(ui, &first, &second, 150.0);
+                two_lines_fixed(ui, &first, &second, text_width(ui));
             }
         });
     }
@@ -1101,14 +1124,17 @@ mod tests {
         d.line = "31".into();
         d.expected = now + chrono::Duration::seconds(6 * 60 + 20);
         d.aimed = d.expected;
-        assert_eq!(headline(&d, now), "Bus 31 · 6 min");
+        assert_eq!(headline(&d, now), "31 · 6 min");
         d.aimed = d.expected - chrono::Duration::minutes(3);
-        assert_eq!(headline(&d, now), "Bus 31 · 6 min +3");
+        assert_eq!(headline(&d, now), "31 · 6 min +3");
         d.expected = now + chrono::Duration::seconds(20);
         d.aimed = d.expected;
-        assert_eq!(headline(&d, now), "Bus 31 · now");
+        assert_eq!(headline(&d, now), "31 · now");
         d.cancelled = true;
-        assert_eq!(headline(&d, now), "Bus 31 · cancelled");
+        assert_eq!(headline(&d, now), "31 · cancelled");
+        // Without a line number the mode names the departure.
+        d.line.clear();
+        assert_eq!(headline(&d, now), "Bus · cancelled");
     }
 
     #[test]

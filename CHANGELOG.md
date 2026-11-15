@@ -3,6 +3,14 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Next Departure shows just the line and countdown (`31 · 6 min`); the icon
+  already shows the mode. The pill is compact and keeps one width; longer
+  text scrolls.
+
 ## 1.1.0 - 2026-11-15
 
 ### Added
