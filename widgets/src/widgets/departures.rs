@@ -110,7 +110,16 @@ impl Level {
             Self::High => tr("High"),
         }
     }
-    fn color(self) -> egui::Color32 {
+    fn color(self, on_light: bool) -> egui::Color32 {
+        if on_light {
+            return match self {
+                Self::High => egui::Color32::from_rgb(0xB0, 0x20, 0x20),
+                Self::Medium => egui::Color32::from_rgb(0x9B, 0x50, 0x00),
+                Self::Low => egui::Color32::from_rgb(0x7A, 0x65, 0x00),
+                Self::None => egui::Color32::from_rgb(0x20, 0x70, 0x35),
+                Self::Unknown => egui::Color32::from_gray(80),
+            };
+        }
         match self {
             Self::High => egui::Color32::from_rgb(0xFF, 0x6B, 0x6B),
             Self::Medium => egui::Color32::from_rgb(0xFF, 0xB3, 0x47),
@@ -690,12 +699,30 @@ pub fn countdown(expected: DateTime<Utc>, now: DateTime<Utc>) -> String {
     }
 }
 
-/// Line 1 for a departure, e.g. `Bus 31 · 6 min +3`.
-/// The pill's text width: room for its usual content, "Traffic: Unknown"
-/// under a two-digit countdown, so the pill keeps one size. Delays, long line
-/// names and notices scroll.
+/// Extra room after measuring the widest normal text.
+const WIDTH_MARGIN: f32 = 6.0;
+
+/// Keep a stable width for every translated traffic level and the countdown.
+/// Delays, long line names and notices still scroll.
+fn widest(measure: impl Fn(&str, f32) -> f32) -> f32 {
+    let mut width = measure("31 · 10 min", 12.0);
+    for level in [
+        Level::Unknown,
+        Level::None,
+        Level::Low,
+        Level::Medium,
+        Level::High,
+    ] {
+        width = width.max(measure(
+            &trf("Traffic: {level}", &[("level", &level.label())]),
+            11.0,
+        ));
+    }
+    (width + WIDTH_MARGIN).ceil()
+}
+
 fn text_width(ui: &egui::Ui) -> f32 {
-    let measure = |text: &str, size: f32| {
+    widest(|text: &str, size: f32| {
         ui.ctx().fonts_mut(|f| {
             f.layout_no_wrap(
                 text.into(),
@@ -705,10 +732,7 @@ fn text_width(ui: &egui::Ui) -> f32 {
             .size()
             .x
         })
-    };
-    measure(tr("Traffic: Unknown"), 11.0)
-        .max(measure("31 · 10 min", 12.0))
-        .ceil()
+    })
 }
 
 /// Line one of the pill, e.g. "31 · 6 min". The tile beside it shows the
@@ -889,7 +913,7 @@ impl Widget for DeparturesWidget {
                     job.append(
                         level.label(),
                         0.0,
-                        egui::TextFormat::simple(font, level.color()),
+                        egui::TextFormat::simple(font, level.color(crate::app::on_light(ui))),
                     );
                     ui.add(egui::Label::new(job).truncate());
                 });
@@ -941,6 +965,73 @@ impl DeparturesWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn width_fits_the_longest_traffic_label_plus_margin() {
+        let original_language = if crate::i18n::norwegian() {
+            crate::i18n::Language::Norwegian
+        } else {
+            crate::i18n::Language::English
+        };
+        for language in [
+            crate::i18n::Language::English,
+            crate::i18n::Language::Norwegian,
+        ] {
+            crate::i18n::apply(language);
+            let w = widest(|s, _| s.chars().count() as f32);
+            let longest = [
+                Level::Unknown,
+                Level::None,
+                Level::Low,
+                Level::Medium,
+                Level::High,
+            ]
+            .iter()
+            .map(|l| {
+                trf("Traffic: {level}", &[("level", &l.label())])
+                    .chars()
+                    .count()
+            })
+            .max()
+            .unwrap() as f32;
+            assert!(w >= longest + WIDTH_MARGIN, "{language:?}");
+        }
+        crate::i18n::apply(original_language);
+    }
+
+    #[test]
+    fn width_includes_the_larger_departure_font_and_rounds_up() {
+        let w = widest(|s, size| {
+            if s == "31 · 10 min" {
+                assert_eq!(size, 12.0);
+                100.25
+            } else {
+                assert_eq!(size, 11.0);
+                20.0
+            }
+        });
+        assert_eq!(w, (100.25 + WIDTH_MARGIN).ceil());
+    }
+
+    #[test]
+    fn level_colours_are_readable_on_both_bars() {
+        for l in [
+            Level::Unknown,
+            Level::None,
+            Level::Low,
+            Level::Medium,
+            Level::High,
+        ] {
+            assert!(
+                crate::tone::contrast(l.color(false), [0x20; 3]) >= 3.0,
+                "{l:?} dark"
+            );
+            assert!(
+                crate::tone::contrast(l.color(true), [0xF3; 3]) >= 3.0,
+                "{l:?} light"
+            );
+        }
+    }
 
     /// Draws every mode's tile and the two-line layout; with
     /// `BTW_TILE_SHOT=<png>` the result is saved for a visual check.

@@ -14,13 +14,16 @@ use crate::widgets::Widget;
 
 const WARM: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x6B, 0x6B);
 const COLD: egui::Color32 = egui::Color32::from_rgb(0x6F, 0xB7, 0xFF);
+const WARM_ON_LIGHT: egui::Color32 = egui::Color32::from_rgb(0xB0, 0x20, 0x20);
+const COLD_ON_LIGHT: egui::Color32 = egui::Color32::from_rgb(0x15, 0x60, 0xA0);
 
 /// Above zero reads red, zero and below read blue (by the displayed value).
-fn temp_color(t: f32) -> egui::Color32 {
-    if t.round() > 0.0 {
-        WARM
-    } else {
-        COLD
+fn temp_color(t: f32, on_light: bool) -> egui::Color32 {
+    match (t.round() > 0.0, on_light) {
+        (true, false) => WARM,
+        (false, false) => COLD,
+        (true, true) => WARM_ON_LIGHT,
+        (false, true) => COLD_ON_LIGHT,
     }
 }
 
@@ -405,20 +408,24 @@ impl Widget for WeatherWidget {
                             ui.spacing_mut().item_spacing = egui::vec2(5.0, 0.0);
                             ui.label(
                                 egui::RichText::new(format!("{:.0}°", d.hi))
-                                    .color(temp_color(d.hi))
+                                    .color(temp_color(d.hi, crate::app::on_light(ui)))
                                     .size(12.0),
                             );
                             ui.label(
                                 egui::RichText::new(format!("{:.0}°", d.lo))
-                                    .color(temp_color(d.lo))
+                                    .color(temp_color(d.lo, crate::app::on_light(ui)))
                                     .size(12.0),
                             );
                         });
                         let second = rain_line(d, chrono::Utc::now());
                         // One line; the pill grows to fit it.
                         ui.add(
-                            egui::Label::new(egui::RichText::new(second).color(COLD).size(11.0))
-                                .extend(),
+                            egui::Label::new(
+                                egui::RichText::new(second)
+                                    .color(temp_color(0.0, crate::app::on_light(ui)))
+                                    .size(11.0),
+                            )
+                            .extend(),
                         );
                     }
                     None => {
@@ -464,6 +471,20 @@ impl WeatherWidget {
 #[cfg(test)]
 mod tests {
     use super::{current_onset, find_onset, onset_hint, parse_places, symbol_svg, wet_hours};
+
+    #[test]
+    fn temperature_colours_are_readable_on_both_bars() {
+        for t in [-5.0, 0.0, 0.4, 0.6, 12.0] {
+            assert!(
+                crate::tone::contrast(super::temp_color(t, false), [0x20; 3]) >= 3.0,
+                "{t} dark"
+            );
+            assert!(
+                crate::tone::contrast(super::temp_color(t, true), [0xF3; 3]) >= 3.0,
+                "{t} light"
+            );
+        }
+    }
 
     #[test]
     fn the_second_line_says_dry_when_nothing_is_due() {

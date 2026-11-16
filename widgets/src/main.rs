@@ -29,6 +29,7 @@ mod single;
 mod studio;
 mod theme;
 mod theme_file;
+mod tone;
 mod tray;
 mod widgets;
 

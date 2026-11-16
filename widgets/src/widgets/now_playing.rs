@@ -292,9 +292,18 @@ fn media_button(ui: &mut egui::Ui, button: Button, playing: bool) -> (egui::Rect
     let p = ui.painter();
     let c = rect.center();
     if hover {
-        p.circle_filled(c, 11.0, egui::Color32::from_white_alpha(28));
+        let hover_color = if crate::app::on_light(ui) {
+            egui::Color32::from_black_alpha(28)
+        } else {
+            egui::Color32::from_white_alpha(28)
+        };
+        p.circle_filled(c, 11.0, hover_color);
     }
-    let white = egui::Color32::from_gray(235);
+    let glyph = if crate::app::on_light(ui) {
+        egui::Color32::from_gray(25)
+    } else {
+        egui::Color32::from_gray(235)
+    };
     let triangle = |left: f32, w: f32, h: f32| {
         vec![
             egui::pos2(left, c.y - h),
@@ -309,14 +318,14 @@ fn media_button(ui: &mut egui::Ui, button: Button, playing: bool) -> (egui::Rect
                 p.rect_filled(
                     egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(2.6, 10.0)),
                     0.5,
-                    white,
+                    glyph,
                 );
             }
         }
         Button::PlayPause => {
             p.add(egui::Shape::convex_polygon(
                 triangle(c.x - 3.5, 8.5, 5.5),
-                white,
+                glyph,
                 egui::Stroke::NONE,
             ));
         }
@@ -324,13 +333,13 @@ fn media_button(ui: &mut egui::Ui, button: Button, playing: bool) -> (egui::Rect
         Button::Next => {
             p.add(egui::Shape::convex_polygon(
                 triangle(c.x - 5.0, 7.5, 5.0),
-                white,
+                glyph,
                 egui::Stroke::NONE,
             ));
             p.rect_filled(
                 egui::Rect::from_center_size(egui::pos2(c.x + 3.8, c.y), egui::vec2(2.2, 10.0)),
                 0.5,
-                white,
+                glyph,
             );
         }
     }

@@ -305,7 +305,6 @@ pub static NB: &[(&str, &str)] = &[
     ("High", "Høy"),
     ("Traffic: ", "Trafikk: "),
     ("Traffic: {level}", "Trafikk: {level}"),
-    ("Traffic: Unknown", "Trafikk: Ukjent"),
     ("{line} · cancelled", "{line} · innstilt"),
     ("No departures", "Ingen avganger"),
     ("Next 4 hours", "Neste 4 timer"),

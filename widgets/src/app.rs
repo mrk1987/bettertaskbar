@@ -31,6 +31,21 @@ pub const PILL_HEIGHT: f32 = 48.0;
 const TEXT: egui::Color32 = egui::Color32::from_gray(240);
 /// Second lines (`RichText::weak`).
 const TEXT_WEAK: egui::Color32 = egui::Color32::from_gray(175);
+const TEXT_ON_LIGHT: egui::Color32 = egui::Color32::from_gray(25);
+const TEXT_WEAK_ON_LIGHT: egui::Color32 = egui::Color32::from_gray(80);
+
+pub fn on_light(ui: &egui::Ui) -> bool {
+    !ui.visuals().dark_mode
+}
+
+fn text_colors(docked: bool, light_bar: bool) -> (egui::Color32, egui::Color32, bool) {
+    if docked && light_bar {
+        (TEXT_ON_LIGHT, TEXT_WEAK_ON_LIGHT, false)
+    } else {
+        (TEXT, TEXT_WEAK, true)
+    }
+}
+
 /// Tallest widget element (the weather symbol); the centered content row height.
 const CONTENT_HEIGHT: f32 = 28.0;
 
@@ -1012,11 +1027,27 @@ impl WidgetApp {
             }
             (None, None) => None,
         };
-        if ui.visuals().widgets.noninteractive.fg_stroke.color != TEXT {
+        let state = self.state();
+        let on_bar = match &self.drag {
+            Some(d) if d.moving => d.snapped.is_some(),
+            _ => state.placement == Placement::Taskbar,
+        };
+        let (text, weak, dark_mode) =
+            text_colors(on_bar, on_bar && crate::tone::taskbar_is_light());
+        if ui.visuals().widgets.noninteractive.fg_stroke.color != text
+            || ui.visuals().weak_text_color != Some(weak)
+            || ui.visuals().dark_mode != dark_mode
+        {
             ctx.all_styles_mut(|style| {
-                style.visuals.widgets.noninteractive.fg_stroke.color = TEXT;
-                style.visuals.weak_text_color = Some(TEXT_WEAK);
+                style.visuals.dark_mode = dark_mode;
+                style.visuals.widgets.noninteractive.fg_stroke.color = text;
+                style.visuals.weak_text_color = Some(weak);
             });
+            // This frame's root Ui already holds its style; update it too.
+            let visuals = ui.visuals_mut();
+            visuals.dark_mode = dark_mode;
+            visuals.widgets.noninteractive.fg_stroke.color = text;
+            visuals.weak_text_color = Some(weak);
         }
         // Before `tick`, so a rotating pill holds its item from the very frame
         // of a press: a double-click then opens what was under the cursor.
@@ -1030,7 +1061,6 @@ impl WidgetApp {
         self.widget.interaction(hovered, pressed);
         self.widget.tick();
         let ppp = ctx.pixels_per_point();
-        let state = self.state();
         crate::i18n::apply(self.cfg.lock().unwrap().language);
         // Text a widget built earlier (calendar lines, notices) is in the old
         // language: read again so it is rebuilt in the new one.
@@ -1070,12 +1100,6 @@ impl WidgetApp {
             }
         }
 
-        // On a taskbar the pill is square and painted the bar's own color so
-        // it reads as part of the bar; anywhere else it is a rounded card.
-        let on_bar = match &self.drag {
-            Some(d) if d.moving => d.snapped.is_some(),
-            _ => state.placement == Placement::Taskbar,
-        };
         if let Some(hwnd) = hwnd.filter(|_| self.applied_round != Some(!on_bar)) {
             self.applied_round = Some(!on_bar);
             shell::round_corners(hwnd, !on_bar);
@@ -1238,6 +1262,17 @@ impl WidgetApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docked_on_light_bar_uses_dark_text() {
+        assert_eq!(
+            text_colors(true, true),
+            (TEXT_ON_LIGHT, TEXT_WEAK_ON_LIGHT, false)
+        );
+        assert_eq!(text_colors(true, false), (TEXT, TEXT_WEAK, true));
+        assert_eq!(text_colors(false, true), (TEXT, TEXT_WEAK, true));
+        assert_eq!(text_colors(false, false), (TEXT, TEXT_WEAK, true));
+    }
 
     fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
         RECT {
