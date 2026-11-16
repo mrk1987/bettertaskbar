@@ -129,9 +129,39 @@ impl Page {
 }
 
 pub fn open(page: Page) {
+    open_request(page as usize);
+}
+
+fn settings_request(kind: Kind) -> usize {
+    Page::ALL.len() + kind.index()
+}
+
+fn decode_page_request(code: usize) -> Option<(Page, Option<Kind>)> {
+    if let Some(&page) = Page::ALL.get(code) {
+        return Some((page, None));
+    }
+    let &kind = Kind::ALL.get(code.checked_sub(Page::ALL.len())?)?;
+    Some((Page::of(kind), Some(kind)))
+}
+
+pub fn open_settings(kind: Kind) {
+    open_request(settings_request(kind));
+}
+
+fn startup_page_request() -> Option<usize> {
+    std::env::args().find_map(|a| {
+        a.strip_prefix("--settings-request=")
+            .and_then(|s| s.parse().ok())
+    })
+}
+
+fn open_request(code: usize) {
+    let Some((page, _)) = decode_page_request(code) else {
+        return;
+    };
     if let Some(hwnd) = crate::shell::find_by_title(TITLE) {
         unsafe {
-            let _ = PostMessageW(Some(hwnd), PAGE_MESSAGE, WPARAM(page as usize), LPARAM(0));
+            let _ = PostMessageW(Some(hwnd), PAGE_MESSAGE, WPARAM(code), LPARAM(0));
             let _ = ShowWindow(hwnd, SW_RESTORE);
             let _ = SetForegroundWindow(hwnd);
         }
@@ -140,6 +170,7 @@ pub fn open(page: Page) {
     if let Err(e) = std::env::current_exe().and_then(|exe| {
         std::process::Command::new(exe)
             .arg(format!("--dashboard={}", page.key()))
+            .arg(format!("--settings-request={code}"))
             .spawn()
     }) {
         crate::log::line("dashboard", &format!("Cannot open dashboard: {e}"));
@@ -226,6 +257,9 @@ impl Dashboard {
             last_refresh: std::time::Instant::now(),
             action_focus: None,
         };
+        if let Some(code) = startup_page_request() {
+            dashboard.focus_page(code);
+        }
         if let Some(code) = std::env::args().find_map(|a| {
             a.strip_prefix("--edit-action=")
                 .and_then(|s| s.parse().ok())
@@ -233,6 +267,14 @@ impl Dashboard {
             dashboard.focus_action(code);
         }
         dashboard
+    }
+    fn focus_page(&mut self, code: usize) {
+        if let Some((page, kind)) = decode_page_request(code) {
+            self.page = page;
+            if let Some(Kind::Departures(slot)) = kind {
+                self.select_departure_slot(slot);
+            }
+        }
     }
     fn focus_action(&mut self, code: usize) {
         if let Some(&kind) = Kind::ALL
@@ -280,6 +322,9 @@ impl Dashboard {
                 self.base.departure_slots = draft.departure_slots.clone();
                 self.base.news = draft.news.clone();
                 for kind in crate::app::user_facing_kinds(&draft) {
+                    if !kind.exists(&self.base) {
+                        continue;
+                    }
                     kind.state_mut(&mut self.base).double_click =
                         kind.state(&draft).double_click.clone();
                 }
@@ -331,6 +376,10 @@ impl Dashboard {
     }
 
     fn save_action(&mut self, kind: Kind) {
+        if !kind.exists(&self.draft) || !kind.exists(&self.base) {
+            self.notice = Some((false, tr("This pill no longer exists.").into()));
+            return;
+        }
         let draft = kind.state(&self.draft).double_click.clone();
         let base = kind.state(&self.base).double_click.clone();
         let result = config::try_update_checked(&self.cfg, |latest| {
@@ -367,6 +416,9 @@ impl Dashboard {
 
     fn action_settings(&mut self, ui: &mut egui::Ui, kind: Kind) {
         use crate::click_action::{Action, Target};
+        if !kind.exists(&self.draft) {
+            return;
+        }
         ui.push_id(("double-click", kind.key()), |ui| {
             let default_url = kind.default_url(&self.draft);
             let click = &mut kind.state_mut(&mut self.draft).double_click;
@@ -1178,9 +1230,7 @@ impl eframe::App for Dashboard {
             }
         }
         let request = REQUESTED.swap(usize::MAX, Ordering::Relaxed);
-        if let Some(page) = Page::ALL.get(request) {
-            self.page = *page;
-        }
+        self.focus_page(request);
         let action = REQUESTED_ACTION.swap(usize::MAX, Ordering::Relaxed);
         if action != usize::MAX {
             self.focus_action(action);
@@ -1323,7 +1373,7 @@ pub fn run(page: Page) {
     };
     if exists {
         if crate::shell::find_by_title(TITLE).is_some() {
-            open(page);
+            open_request(startup_page_request().unwrap_or(page as usize));
         }
         return;
     }
@@ -1607,6 +1657,77 @@ mod tests {
             close_prompt: false,
             last_refresh: std::time::Instant::now(),
             action_focus: None,
+        }
+    }
+
+    #[test]
+    fn removed_departure_slot_is_not_recreated_by_action_editor() {
+        let mut dashboard = fixture();
+        let slot = dashboard.base.add_departure_slot().unwrap();
+        dashboard.base.departures_for_mut(slot).unwrap().name = "Saved route".into();
+        dashboard.draft = dashboard.base.clone();
+        let before = dashboard.base.departure_slots[&slot].clone();
+        dashboard.draft.remove_departure_slot(slot);
+        dashboard.action_focus = Some(Kind::Departures(slot));
+        *dashboard.cfg.lock().unwrap() = dashboard.base.clone();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| dashboard.widgets(ui, false));
+        output.textures_delta.clear();
+        assert!(!Kind::Departures(slot).exists(&dashboard.draft));
+        assert_eq!(dashboard.base.departure_slots[&slot], before);
+    }
+
+    #[test]
+    fn removed_departure_slot_is_not_recreated_by_save_action() {
+        // Isolate persistence from the user's real widgets.json, even on failure.
+        if std::env::var_os("BTW_REMOVED_SLOT_TEST").is_none() {
+            let dir = std::env::temp_dir()
+                .join(format!("BetterTaskbar-removed-slot-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "dashboard::tests::removed_departure_slot_is_not_recreated_by_save_action",
+                ])
+                .env("APPDATA", &dir)
+                .env("BTW_REMOVED_SLOT_TEST", "1")
+                .status()
+                .unwrap();
+            std::fs::remove_dir_all(&dir).unwrap();
+            assert!(status.success());
+            return;
+        }
+        let mut dashboard = fixture();
+        let slot = dashboard.base.add_departure_slot().unwrap();
+        dashboard.base.departures_for_mut(slot).unwrap().name = "Saved route".into();
+        dashboard.draft = dashboard.base.clone();
+        *dashboard.cfg.lock().unwrap() = dashboard.base.clone();
+        let before = dashboard.base.departure_slots[&slot].clone();
+        dashboard.draft.remove_departure_slot(slot);
+        dashboard.save_action(Kind::Departures(slot));
+        assert!(!Kind::Departures(slot).exists(&dashboard.draft));
+        assert_eq!(dashboard.base.departure_slots[&slot], before);
+        assert_eq!(dashboard.cfg.lock().unwrap().departure_slots[&slot], before);
+        assert!(!config::path().exists(), "rejected action must not save");
+    }
+
+    #[test]
+    fn settings_page_request_selects_the_requested_departure_slot() {
+        let mut dashboard = fixture();
+        for _ in 1..config::DEPARTURE_SLOTS {
+            dashboard.draft.add_departure_slot();
+        }
+        for slot in 0..config::DEPARTURE_SLOTS {
+            dashboard.draft.departures_for_mut(slot).unwrap().lines = vec![slot.to_string()];
+        }
+        for kind in Kind::ALL {
+            dashboard.select_departure_slot(0);
+            dashboard.focus_page(settings_request(kind));
+            assert!(dashboard.page == Page::of(kind));
+            if let Kind::Departures(slot) = kind {
+                assert_eq!(dashboard.dep_slot, slot);
+                assert_eq!(dashboard.lines_text, slot.to_string());
+            }
         }
     }
 

@@ -974,9 +974,7 @@ impl WidgetApp {
                 }
             }),
             Ok(Some(Action::Search)) => crate::dashboard::open(crate::dashboard::Page::Weather),
-            Ok(Some(Action::Settings)) => {
-                crate::dashboard::open(crate::dashboard::Page::of(self.kind))
-            }
+            Ok(Some(Action::Settings)) => crate::dashboard::open_settings(self.kind),
             Ok(Some(Action::Quit)) => crate::quit_all(),
             Ok(None) => {}
             Err(e) => crate::log::line("menu", &e.to_string()),
