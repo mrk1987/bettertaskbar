@@ -730,12 +730,11 @@ pub fn headline(d: &Departure, now: DateTime<Utc>) -> String {
     text
 }
 
-fn pick(c: &Config) -> (DeparturesCfg, u64, bool) {
-    (
-        c.departures.clone(),
-        c.departures.refresh_secs,
-        c.departures.stop.is_some(),
-    )
+fn pick(c: &Config, slot: u8) -> (DeparturesCfg, u64, bool) {
+    let settings = c.departures_for(slot).cloned().unwrap_or_default();
+    let configured = c.departures_for(slot).is_some() && settings.stop.is_some();
+    let refresh = settings.refresh_secs;
+    (settings, refresh, configured)
 }
 
 fn fetch_update(cfg: &DeparturesCfg) -> Result<(Board, String), String> {
@@ -759,9 +758,15 @@ pub struct DeparturesWidget {
 }
 
 impl DeparturesWidget {
-    pub fn new(cfg: SharedConfig) -> Self {
+    pub fn new(slot: u8, cfg: SharedConfig) -> Self {
         let (tx, rx) = mpsc::channel();
-        let refresh = crate::widgets::poll("departures", cfg, tx, pick, fetch_update);
+        let refresh = crate::widgets::poll(
+            crate::app::Kind::Departures(slot).key(),
+            cfg,
+            tx,
+            move |c| pick(c, slot),
+            fetch_update,
+        );
         Self {
             refresh,
             rx,
@@ -944,6 +949,25 @@ mod tests {
 
     /// Draws every mode's tile and the two-line layout; with
     /// `BTW_TILE_SHOT=<png>` the result is saved for a visual check.
+    #[test]
+    fn polling_reads_only_its_slot_and_removal_unconfigures_it() {
+        let mut c = Config::default();
+        let slot = c.add_departure_slot().unwrap();
+        c.departures_for_mut(slot).unwrap().stop = Some(Stop {
+            id: "NSR:StopPlace:1".into(),
+            name: "Fixture".into(),
+            lat: 0.0,
+            lon: 0.0,
+        });
+        c.departures_for_mut(slot).unwrap().refresh_secs = 90;
+        assert!(!pick(&c, 0).2);
+        let (settings, refresh, configured) = pick(&c, slot);
+        assert!(configured);
+        assert_eq!(refresh, 90);
+        assert_eq!(settings.stop.unwrap().name, "Fixture");
+        c.remove_departure_slot(slot);
+        assert!(!pick(&c, slot).2);
+    }
     #[test]
     fn mode_tiles_render() {
         use crate::cpu_render::{self, Canvas, Textures};

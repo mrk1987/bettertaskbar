@@ -106,6 +106,7 @@ pub struct Stop {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DeparturesCfg {
+    pub name: String,
     pub stop: Option<Stop>,
     pub favorites: Vec<Stop>,
     /// Line numbers to show, as on the bus (`31`, `5E`); empty shows every line.
@@ -124,6 +125,7 @@ pub struct DeparturesCfg {
 impl Default for DeparturesCfg {
     fn default() -> Self {
         Self {
+            name: String::new(),
             stop: None,
             favorites: vec![],
             lines: vec![],
@@ -280,6 +282,7 @@ impl Default for WidgetState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub departure_slots: std::collections::BTreeMap<u8, DepartureSlot>,
     /// Interface language; `System` follows Windows.
     pub language: crate::i18n::Language,
     pub magnetized: bool,
@@ -310,6 +313,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            departure_slots: Default::default(),
             language: Default::default(),
             magnetized: true,
             process_per_widget: false,
@@ -344,6 +348,21 @@ impl Default for Config {
     }
 }
 
+pub const DEPARTURE_SLOTS: u8 = 6;
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DepartureSlot {
+    pub departures: DeparturesCfg,
+    pub widget: WidgetState,
+}
+impl Default for DepartureSlot {
+    fn default() -> Self {
+        Self {
+            departures: DeparturesCfg::default(),
+            widget: WidgetState::opt_in(),
+        }
+    }
+}
 pub type SharedConfig = Arc<Mutex<Config>>;
 
 /// The usage refresh intervals the dashboard offers, in minutes; the first is
@@ -351,6 +370,34 @@ pub type SharedConfig = Arc<Mutex<Config>>;
 pub const USAGE_REFRESH_CHOICES: [u64; 4] = [5, 10, 15, 30];
 
 impl Config {
+    pub fn departures_for(&self, slot: u8) -> Option<&DeparturesCfg> {
+        match slot {
+            0 => Some(&self.departures),
+            1..DEPARTURE_SLOTS => self.departure_slots.get(&slot).map(|s| &s.departures),
+            _ => None,
+        }
+    }
+    pub fn departures_for_mut(&mut self, slot: u8) -> Option<&mut DeparturesCfg> {
+        match slot {
+            0 => Some(&mut self.departures),
+            1..DEPARTURE_SLOTS => self
+                .departure_slots
+                .get_mut(&slot)
+                .map(|s| &mut s.departures),
+            _ => None,
+        }
+    }
+    pub fn add_departure_slot(&mut self) -> Option<u8> {
+        let slot = (1..DEPARTURE_SLOTS).find(|s| !self.departure_slots.contains_key(s))?;
+        self.departure_slots.insert(slot, DepartureSlot::default());
+        Some(slot)
+    }
+    pub fn remove_departure_slot(&mut self, slot: u8) {
+        if slot != 0 {
+            self.departure_slots.remove(&slot);
+        }
+    }
+
     /// Time between usage readings. Values edited by hand are kept within the
     /// offered range, so a typo cannot hammer a provider.
     pub fn usage_refresh(&self) -> std::time::Duration {
@@ -535,6 +582,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn old_config_is_slot_zero_unchanged() {
+        let old = r#"{"departures":{"stop":{"id":"NSR:StopPlace:1","name":"A","lat":0.0,"lon":0.0}},
+                      "departures_widget":{"enabled":true,"x":5,"y":6}}"#;
+        let c: Config = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            c.departures_for(0).unwrap().stop.as_ref().unwrap().name,
+            "A"
+        );
+        assert!(crate::app::Kind::Departures(0).state(&c).enabled);
+        assert_eq!((c.departures_widget.x, c.departures_widget.y), (5, 6));
+        assert!((1..6).all(|s| !crate::app::Kind::Departures(s).exists(&c)));
+    }
+    #[test]
+    fn removing_a_slot_keeps_the_others() {
+        let mut c = Config::default();
+        assert_eq!(
+            (
+                c.add_departure_slot(),
+                c.add_departure_slot(),
+                c.add_departure_slot()
+            ),
+            (Some(1), Some(2), Some(3))
+        );
+        c.departures_for_mut(3).unwrap().direction = "Sentrum".into();
+        c.remove_departure_slot(2);
+        assert!(!crate::app::Kind::Departures(2).exists(&c));
+        assert_eq!(c.departures_for(3).unwrap().direction, "Sentrum");
+        assert_eq!(c.add_departure_slot(), Some(2));
+    }
+    #[test]
+    fn at_most_six_and_slot_zero_stays() {
+        let mut c = Config::default();
+        for _ in 0..5 {
+            assert!(c.add_departure_slot().is_some());
+        }
+        assert_eq!(c.add_departure_slot(), None);
+        c.remove_departure_slot(0);
+        assert!(crate::app::Kind::Departures(0).exists(&c));
+    }
+    #[test]
+    fn slot_keys_and_titles() {
+        use crate::app::Kind;
+        assert_eq!(Kind::Departures(0).key(), "departures");
+        assert_eq!(Kind::Departures(5).key(), "departures-6");
+        assert_eq!(
+            Kind::Departures(1).title(),
+            "BetterTaskbar Next Departure 2"
+        );
+    }
+
+    #[test]
     fn usage_refresh_defaults_to_five_minutes_and_stays_in_range() {
         let mut c = Config::default();
         assert_eq!(c.usage_refresh().as_secs(), 300);
@@ -610,7 +708,7 @@ mod tests {
         // A file from 1.0.1 has none of the newer widgets: they stay off.
         let old: Config = serde_json::from_str(r#"{"mail_widget":{"enabled":true}}"#).unwrap();
         assert!(!crate::app::Kind::News.state(&old).enabled);
-        assert!(!crate::app::Kind::Departures.state(&old).enabled);
+        assert!(!crate::app::Kind::Departures(0).state(&old).enabled);
         assert_eq!(old.news.feeds.len(), NEWS_PRESETS.len());
         let cfg: Config = serde_json::from_str(r#"{"usage_widgets":{}}"#).unwrap();
         assert!(

@@ -78,7 +78,13 @@ impl Studio {
             return false;
         }
         let theme = self.draft.clone();
-        match config::try_update(cfg, |c| self.kind.state_mut(c).theme = Some(theme)) {
+        match config::try_update_checked(cfg, |c| {
+            if !self.kind.exists(c) {
+                return Err(tr("This pill no longer exists.").into());
+            }
+            self.kind.state_mut(c).theme = Some(theme);
+            Ok(())
+        }) {
             Ok(()) => {
                 self.saved = self.draft.clone();
                 self.custom = true;
@@ -113,15 +119,19 @@ impl Studio {
         }
     }
     pub fn ui(&mut self, ui: &mut egui::Ui, cfg: &SharedConfig) {
+        let settings = cfg.lock().unwrap().clone();
+        if !self.kind.exists(&settings) {
+            *self = Self::new(Kind::Weather, &settings);
+        }
         style::heading(ui,tr("Theme Studio"),tr("Each widget has its own canvas. Drag layers to move them; use the corner handle to resize."));
         ui.horizontal(|ui| {
             ui.label(tr("Widget"));
             let mut kind = self.kind;
             egui::ComboBox::from_id_salt("theme-widget")
-                .selected_text(self.kind.label())
+                .selected_text(self.kind.display_name(&settings))
                 .show_ui(ui, |ui| {
-                    for item in Kind::ALL {
-                        ui.selectable_value(&mut kind, item, item.label());
+                    for item in crate::app::user_facing_kinds(&settings) {
+                        ui.selectable_value(&mut kind, item, item.display_name(&settings));
                     }
                 });
             if kind != self.kind {
@@ -147,7 +157,13 @@ impl Studio {
                 .on_hover_text(tr("Restore this widget’s original built-in appearance"))
                 .clicked()
             {
-                match config::try_update(cfg, |c| self.kind.state_mut(c).theme = None) {
+                match config::try_update_checked(cfg, |c| {
+                    if !self.kind.exists(c) {
+                        return Err(tr("This pill no longer exists.").into());
+                    }
+                    self.kind.state_mut(c).theme = None;
+                    Ok(())
+                }) {
                     Ok(()) => {
                         let kind = self.kind;
                         *self = Self::new(kind, &cfg.lock().unwrap());

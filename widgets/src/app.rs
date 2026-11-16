@@ -58,7 +58,7 @@ pub enum Kind {
     Calendar,
     Mail,
     NowPlaying,
-    Departures,
+    Departures(u8),
     News,
     Usage(ProviderId),
 }
@@ -141,12 +141,42 @@ static DISABLED_USAGE: WidgetState = WidgetState {
 };
 
 impl Kind {
-    pub const ALL: [Kind; 13] = [
+    pub fn exists(self, c: &crate::config::Config) -> bool {
+        match self {
+            Self::Departures(slot) => c.departures_for(slot).is_some(),
+            _ => true,
+        }
+    }
+    pub fn display_name(self, c: &crate::config::Config) -> String {
+        if let Self::Departures(slot) = self {
+            if let Some(cfg) = c.departures_for(slot) {
+                if !cfg.name.trim().is_empty() {
+                    return cfg.name.clone();
+                }
+                if let Some(stop) = &cfg.stop {
+                    return stop.name.clone();
+                }
+            }
+            return if slot == 0 {
+                tr("Next Departure").into()
+            } else {
+                crate::i18n::trf("Next Departure {n}", &[("n", &(slot + 1).to_string())])
+            };
+        }
+        self.label().into()
+    }
+
+    pub const ALL: [Kind; 18] = [
         Kind::Weather,
         Kind::Calendar,
         Kind::Mail,
         Kind::NowPlaying,
-        Kind::Departures,
+        Kind::Departures(0),
+        Kind::Departures(1),
+        Kind::Departures(2),
+        Kind::Departures(3),
+        Kind::Departures(4),
+        Kind::Departures(5),
         Kind::News,
         Kind::Usage(ProviderId::Claude),
         Kind::Usage(ProviderId::Codex),
@@ -173,7 +203,14 @@ impl Kind {
             Self::Calendar => "calendar",
             Self::Mail => "mail",
             Self::NowPlaying => "now-playing",
-            Self::Departures => "departures",
+            Self::Departures(slot) => [
+                "departures",
+                "departures-2",
+                "departures-3",
+                "departures-4",
+                "departures-5",
+                "departures-6",
+            ][slot as usize],
             Self::News => "news",
             Self::Usage(p) => p.descriptor().key,
         }
@@ -184,7 +221,7 @@ impl Kind {
             Self::Calendar => tr("Calendar"),
             Self::Mail => tr("Mail"),
             Self::NowPlaying => tr("Now Playing"),
-            Self::Departures => tr("Next Departure"),
+            Self::Departures(_) => tr("Next Departure"),
             Self::News => tr("News"),
             Self::Usage(p) => p.descriptor().display_name,
         }
@@ -206,7 +243,7 @@ impl Kind {
             Self::Calendar => "https://calendar.proton.me",
             Self::Mail => "https://mail.proton.me",
             Self::NowPlaying => "https://open.spotify.com/",
-            Self::Departures => "https://entur.no/",
+            Self::Departures(_) => "https://entur.no/",
             Self::News => {
                 return cfg
                     .news
@@ -238,7 +275,14 @@ impl Kind {
             Kind::Calendar => "BetterTaskbar Calendar",
             Kind::Mail => "BetterTaskbar Mail",
             Kind::NowPlaying => "BetterTaskbar Now Playing",
-            Kind::Departures => "BetterTaskbar Next Departure",
+            Kind::Departures(slot) => [
+                "BetterTaskbar Next Departure",
+                "BetterTaskbar Next Departure 2",
+                "BetterTaskbar Next Departure 3",
+                "BetterTaskbar Next Departure 4",
+                "BetterTaskbar Next Departure 5",
+                "BetterTaskbar Next Departure 6",
+            ][slot as usize],
             Kind::News => "BetterTaskbar News",
             Kind::Usage(p) => match p {
                 ProviderId::Claude => "BetterTaskbar Claude Code",
@@ -258,7 +302,11 @@ impl Kind {
             Kind::Calendar => &c.calendar_widget,
             Kind::Mail => &c.mail_widget,
             Kind::NowPlaying => &c.now_playing_widget,
-            Kind::Departures => &c.departures_widget,
+            Kind::Departures(0) => &c.departures_widget,
+            Kind::Departures(slot) => c
+                .departure_slots
+                .get(&slot)
+                .map_or(&DISABLED_USAGE, |s| &s.widget),
             Kind::News => &c.news_widget,
             Kind::Usage(p) => c.usage_widgets.get(&p).unwrap_or(&DISABLED_USAGE),
         }
@@ -270,7 +318,8 @@ impl Kind {
             Kind::Calendar => &mut c.calendar_widget,
             Kind::Mail => &mut c.mail_widget,
             Kind::NowPlaying => &mut c.now_playing_widget,
-            Kind::Departures => &mut c.departures_widget,
+            Kind::Departures(0) => &mut c.departures_widget,
+            Kind::Departures(slot) => &mut c.departure_slots.entry(slot).or_default().widget,
             Kind::News => &mut c.news_widget,
             Kind::Usage(p) => c
                 .usage_widgets
@@ -278,6 +327,11 @@ impl Kind {
                 .or_insert_with(|| DISABLED_USAGE.clone()),
         }
     }
+}
+
+/// The catalog entries the user has actually added.
+pub fn user_facing_kinds(c: &crate::config::Config) -> impl Iterator<Item = Kind> + '_ {
+    Kind::ALL.into_iter().filter(|kind| kind.exists(c))
 }
 
 /// A press on the pill, and the drag it may turn into.
@@ -370,7 +424,8 @@ impl WidgetApp {
             Kind::Calendar => Box::new(CalendarWidget::new(cfg.clone())),
             Kind::Mail => Box::new(MailWidget::new(cfg.clone())),
             Kind::NowPlaying => Box::new(crate::widgets::now_playing::NowPlayingWidget::new()),
-            Kind::Departures => Box::new(crate::widgets::departures::DeparturesWidget::new(
+            Kind::Departures(slot) => Box::new(crate::widgets::departures::DeparturesWidget::new(
+                slot,
                 cfg.clone(),
             )),
             Kind::News => Box::new(crate::widgets::news::NewsWidget::new(cfg.clone())),
@@ -422,11 +477,12 @@ impl WidgetApp {
             Kind::Mail => GAP + WEATHER + GAP + 230 + GAP,
             Kind::Usage(p) => GAP + WEATHER + GAP + 230 + GAP + 230 + GAP + (p as i32) * 176,
             // After every usage pill, so turning one on never lands on another.
-            Kind::NowPlaying | Kind::Departures | Kind::News => {
+            Kind::NowPlaying | Kind::Departures(_) | Kind::News => {
                 let after_usage = GAP + WEATHER + GAP + 230 + GAP + 230 + GAP + 7 * 176;
                 let slot = match self.kind {
                     Kind::NowPlaying => 0,
-                    Kind::Departures => 1,
+                    Kind::Departures(0) => 1,
+                    Kind::Departures(n) => 3 + i32::from(n),
                     _ => 2,
                 };
                 after_usage + slot * (230 + GAP)
@@ -440,7 +496,11 @@ impl WidgetApp {
 
     fn with_state(&self, f: impl FnOnce(&mut WidgetState)) {
         let kind = self.kind;
-        crate::config::update(&self.cfg, |c| f(kind.state_mut(c)));
+        crate::config::update(&self.cfg, |c| {
+            if kind.exists(c) {
+                f(kind.state_mut(c));
+            }
+        });
     }
 
     /// Put a docked pill where its saved tray distance says, if it is not
@@ -737,8 +797,7 @@ impl WidgetApp {
     fn drag_frame(&mut self, hwnd: HWND, pressed: bool) {
         if self.drag.is_none() && (pressed || shell::fake_press_on(hwnd)) {
             let r = shell::screen_rect(hwnd);
-            let others = Kind::ALL
-                .into_iter()
+            let others = user_facing_kinds(&self.cfg.lock().unwrap())
                 .filter(|k| *k != self.kind)
                 .filter_map(|k| shell::find_by_title(k.title()))
                 .collect();
@@ -837,8 +896,14 @@ impl WidgetApp {
                 Action::Search,
             ));
         }
-        if self.kind == Kind::Departures {
-            let departures = self.cfg.lock().unwrap().departures.clone();
+        if let Kind::Departures(slot) = self.kind {
+            let departures = self
+                .cfg
+                .lock()
+                .unwrap()
+                .departures_for(slot)
+                .cloned()
+                .unwrap_or_default();
             let mut stops = Vec::new();
             if let Some(current) = &departures.stop {
                 stops.push(Item::Command(
@@ -887,7 +952,11 @@ impl WidgetApp {
                 crate::widgets::weather::set_place(&self.cfg, place)
             }
             Ok(Some(Action::Stop(stop))) => crate::config::update(&self.cfg, |c| {
-                c.departures.stop = Some(stop);
+                if let Kind::Departures(slot) = self.kind {
+                    if let Some(d) = c.departures_for_mut(slot) {
+                        d.stop = Some(stop);
+                    }
+                }
             }),
             Ok(Some(Action::Search)) => crate::dashboard::open(crate::dashboard::Page::Weather),
             Ok(Some(Action::Settings)) => {
@@ -1248,6 +1317,15 @@ mod tests {
         }
     }
 
+    #[test]
+    fn only_existing_slots_are_listed() {
+        let mut c = crate::config::Config::default();
+        c.add_departure_slot();
+        let listed: Vec<_> = user_facing_kinds(&c)
+            .filter(|k| matches!(k, Kind::Departures(_)))
+            .collect();
+        assert_eq!(listed, [Kind::Departures(0), Kind::Departures(1)]);
+    }
     #[test]
     fn a_floating_pill_near_or_on_the_bar_sits_flush_against_it() {
         let bar = rect(0, 1392, 3440, 1440);

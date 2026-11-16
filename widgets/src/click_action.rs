@@ -66,7 +66,7 @@ pub enum Target {
 impl Settings {
     pub fn action(&self, kind: Kind) -> Action {
         self.action.unwrap_or(match kind {
-            Kind::Usage(_) | Kind::Departures => Action::Refresh,
+            Kind::Usage(_) | Kind::Departures(_) => Action::Refresh,
             Kind::News | Kind::NowPlaying => Action::OpenItem,
             _ => Action::OpenUrl,
         })

@@ -51,7 +51,7 @@ impl Page {
             Kind::Calendar => Self::Calendar,
             Kind::Mail => Self::Mail,
             Kind::NowPlaying => Self::NowPlaying,
-            Kind::Departures => Self::Departures,
+            Kind::Departures(_) => Self::Departures,
             Kind::News => Self::News,
             Kind::Usage(_) => Self::Usage,
         }
@@ -187,6 +187,7 @@ struct Dashboard {
     /// The Lines box as typed. Kept apart from the parsed list, so a comma
     /// just typed is not dropped before the next number follows it.
     lines_text: String,
+    dep_slot: u8,
     notice: Option<(bool, String)>,
     test: Option<Receiver<Result<String, String>>>,
     test_configuration: Option<(bool, Config)>,
@@ -213,6 +214,7 @@ impl Dashboard {
             stop_search: Default::default(),
             new_feed: Default::default(),
             lines_text: String::new(),
+            dep_slot: 0,
             notice: None,
             test: None,
             test_configuration: None,
@@ -233,7 +235,10 @@ impl Dashboard {
         dashboard
     }
     fn focus_action(&mut self, code: usize) {
-        if let Some(&kind) = Kind::ALL.get(code / ACTION_SLOTS) {
+        if let Some(&kind) = Kind::ALL
+            .get(code / ACTION_SLOTS)
+            .filter(|k| k.exists(&self.draft))
+        {
             self.page = Page::Widgets;
             if let Some(&action) = (code % ACTION_SLOTS)
                 .checked_sub(1)
@@ -249,6 +254,7 @@ impl Dashboard {
             || self.base.calendar != self.draft.calendar
             || self.base.mail != self.draft.mail
             || self.base.departures != self.draft.departures
+            || self.base.departure_slots != self.draft.departure_slots
             || self.base.news != self.draft.news
             || Kind::ALL
                 .into_iter()
@@ -271,8 +277,9 @@ impl Dashboard {
                 self.base.calendar = draft.calendar.clone();
                 self.base.mail = draft.mail.clone();
                 self.base.departures = draft.departures.clone();
+                self.base.departure_slots = draft.departure_slots.clone();
                 self.base.news = draft.news.clone();
-                for kind in Kind::ALL {
+                for kind in crate::app::user_facing_kinds(&draft) {
                     kind.state_mut(&mut self.base).double_click =
                         kind.state(&draft).double_click.clone();
                 }
@@ -307,8 +314,15 @@ impl Dashboard {
         sync!(calendar);
         sync!(mail);
         sync!(departures);
+        sync!(departure_slots);
+        if !Kind::Departures(self.dep_slot).exists(&self.draft) {
+            self.select_departure_slot(0);
+        }
         sync!(news);
-        for kind in Kind::ALL {
+        for kind in crate::app::user_facing_kinds(&fresh) {
+            if !kind.exists(&self.draft) || !kind.exists(&self.base) {
+                continue;
+            }
             kind.state_mut(&mut self.draft).double_click.refresh_from(
                 &mut kind.state_mut(&mut self.base).double_click,
                 &kind.state(&fresh).double_click,
@@ -320,6 +334,9 @@ impl Dashboard {
         let draft = kind.state(&self.draft).double_click.clone();
         let base = kind.state(&self.base).double_click.clone();
         let result = config::try_update_checked(&self.cfg, |latest| {
+            if !kind.exists(latest) {
+                return Err(tr("This pill no longer exists.").into());
+            }
             draft.merge_into(&base, &mut kind.state_mut(latest).double_click);
             kind.state(latest)
                 .double_click
@@ -393,7 +410,7 @@ impl Dashboard {
             }
             let dirty = kind.state(&self.draft).double_click != kind.state(&self.base).double_click;
             ui.horizontal(|ui| {
-                if ui.add_enabled(dirty && valid.is_ok(), egui::Button::new(tr("Apply action")).fill(style::ACCENT)).clicked() { self.save_action(kind); }
+                if ui.add_enabled(dirty && valid.is_ok() && kind.exists(&self.base), egui::Button::new(tr("Apply action")).fill(style::ACCENT)).clicked() { self.save_action(kind); }
                 if ui.add_enabled(dirty, egui::Button::new(tr("Discard action edits"))).clicked() {
                     kind.state_mut(&mut self.draft).double_click = kind.state(&self.base).double_click.clone();
                 }
@@ -444,20 +461,27 @@ impl Dashboard {
             });
             ui.add_space(12.0);
         }
-        for kind in Kind::ALL {
+        for kind in crate::app::user_facing_kinds(&current) {
             if usage_only && !matches!(kind, Kind::Usage(_)) {
                 continue;
             }
             style::group(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(kind.label()).size(16.0).strong());
+                        ui.label(
+                            egui::RichText::new(kind.display_name(&current))
+                                .size(16.0)
+                                .strong(),
+                        );
                         ui.label(egui::RichText::new(description(kind)).color(style::MUTED));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut enabled = kind.state(&current).enabled;
                         if style::toggle(ui, &mut enabled).changed() {
                             let result = config::try_update(&self.cfg, |c| {
+                                if !kind.exists(c) {
+                                    return;
+                                }
                                 let state = kind.state_mut(c);
                                 state.enabled = enabled;
                                 state.visible = enabled;
@@ -475,6 +499,9 @@ impl Dashboard {
                         && ui.button(tr("Settings")).clicked()
                     {
                         self.page = Page::of(kind);
+                        if let Kind::Departures(slot) = kind {
+                            self.select_departure_slot(slot);
+                        }
                     }
                     if ui.button(tr("Edit theme")).clicked() {
                         self.studio.select(kind, &current);
@@ -498,7 +525,9 @@ impl Dashboard {
                         });
                     if placement != kind.state(&current).placement {
                         if let Err(error) = config::try_update(&self.cfg, |c| {
-                            kind.state_mut(c).placement = placement
+                            if kind.exists(c) {
+                                kind.state_mut(c).placement = placement;
+                            }
                         }) {
                             self.notice = Some((false, error));
                         }
@@ -507,9 +536,11 @@ impl Dashboard {
                         && !kind.state(&current).visible
                         && ui.button(tr("Show widget")).clicked()
                     {
-                        if let Err(e) =
-                            config::try_update(&self.cfg, |c| kind.state_mut(c).visible = true)
-                        {
+                        if let Err(e) = config::try_update(&self.cfg, |c| {
+                            if kind.exists(c) {
+                                kind.state_mut(c).visible = true;
+                            }
+                        }) {
                             self.notice = Some((false, e));
                         }
                     }
@@ -613,8 +644,10 @@ impl Dashboard {
                         .clicked()
                     {
                         if let Err(error) = config::try_update(&self.cfg, |c| {
-                            for kind in Kind::ALL {
-                                kind.state_mut(c).placement = placement;
+                            for kind in crate::app::user_facing_kinds(c).collect::<Vec<_>>() {
+                                if kind.exists(c) {
+                                    kind.state_mut(c).placement = placement;
+                                };
                             }
                         }) {
                             self.notice = Some((false, error));
@@ -844,17 +877,77 @@ impl Dashboard {
         });
     }
 
+    fn select_departure_slot(&mut self, slot: u8) {
+        self.dep_slot = if Kind::Departures(slot).exists(&self.draft) {
+            slot
+        } else {
+            0
+        };
+        self.lines_text = self
+            .draft
+            .departures_for(self.dep_slot)
+            .unwrap()
+            .lines
+            .join(", ");
+        self.stop_search = Default::default();
+    }
+
     fn departures(&mut self, ui: &mut egui::Ui) {
         style::heading(
             ui,
             tr("Next Departure"),
             tr("Upcoming departures from a saved stop, with a traffic level for the route."),
         );
-        style::group(ui, |ui| self.action_settings(ui, Kind::Departures));
+        if !Kind::Departures(self.dep_slot).exists(&self.draft) {
+            self.select_departure_slot(0);
+        }
+        ui.horizontal_wrapped(|ui| {
+            for slot in 0..config::DEPARTURE_SLOTS {
+                let kind = Kind::Departures(slot);
+                if kind.exists(&self.draft)
+                    && ui
+                        .selectable_label(self.dep_slot == slot, (slot + 1).to_string())
+                        .on_hover_text(kind.display_name(&self.draft))
+                        .clicked()
+                {
+                    self.select_departure_slot(slot);
+                }
+            }
+            let can_add = (1..config::DEPARTURE_SLOTS)
+                .any(|slot| !Kind::Departures(slot).exists(&self.draft));
+            if ui
+                .add_enabled(can_add, egui::Button::new("+"))
+                .on_hover_text(tr("Add"))
+                .clicked()
+            {
+                if let Some(slot) = self.draft.add_departure_slot() {
+                    self.select_departure_slot(slot);
+                }
+            }
+            if self.dep_slot != 0 && ui.button(tr("Remove this pill")).clicked() {
+                self.draft.remove_departure_slot(self.dep_slot);
+                self.select_departure_slot(0);
+            }
+        });
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            self.action_settings(ui, Kind::Departures(self.dep_slot))
+        });
+        let departures = self.draft.departures_for_mut(self.dep_slot).unwrap();
+        let stop_search = &mut self.stop_search;
+        let lines_text = &mut self.lines_text;
+        ui.add_space(12.0);
+        style::group(ui, |ui| {
+            style::field(ui, tr("Name"), &mut departures.name, false);
+            ui.colored_label(
+                style::MUTED,
+                tr("Shown in the tray and dashboard; empty uses the stop name"),
+            );
+        });
         ui.add_space(12.0);
         style::group(ui, |ui| {
             ui.label(egui::RichText::new(tr("Stop")).size(16.0).strong());
-            match &self.draft.departures.stop {
+            match &departures.stop {
                 Some(stop) => {
                     ui.label(&stop.name);
                     ui.colored_label(style::MUTED, &stop.id);
@@ -867,12 +960,12 @@ impl Dashboard {
                 }
             }
             ui.add_space(6.0);
-            if let Some(stop) = self.stop_search.ui(ui) {
-                let favorites = &mut self.draft.departures.favorites;
+            if let Some(stop) = stop_search.ui(ui) {
+                let favorites = &mut departures.favorites;
                 if !favorites.contains(&stop) {
                     favorites.push(stop.clone());
                 }
-                self.draft.departures.stop = Some(stop);
+                departures.stop = Some(stop);
             }
         });
         ui.add_space(12.0);
@@ -883,17 +976,14 @@ impl Dashboard {
                 tr("Switch between these from the widget’s right-click menu."),
             );
             let mut remove = None;
-            for (i, stop) in self.draft.departures.favorites.iter().enumerate() {
+            for (i, stop) in departures.favorites.iter().enumerate() {
                 ui.push_id(("stop", i), |ui| {
                     ui.horizontal(|ui| {
                         if ui
-                            .selectable_label(
-                                self.draft.departures.stop.as_ref() == Some(stop),
-                                &stop.name,
-                            )
+                            .selectable_label(departures.stop.as_ref() == Some(stop), &stop.name)
                             .clicked()
                         {
-                            self.draft.departures.stop = Some(stop.clone());
+                            departures.stop = Some(stop.clone());
                         }
                         if ui.small_button(tr("Remove")).clicked() {
                             remove = Some(i);
@@ -902,7 +992,7 @@ impl Dashboard {
                 });
             }
             if let Some(i) = remove {
-                self.draft.departures.favorites.remove(i);
+                departures.favorites.remove(i);
             }
         });
         ui.add_space(12.0);
@@ -910,23 +1000,23 @@ impl Dashboard {
             ui.label(egui::RichText::new(tr("Filters")).size(16.0).strong());
             // Start again from the saved list only when it changed some
             // other way (loaded, discarded, saved elsewhere).
-            if parse_lines(&self.lines_text) != self.draft.departures.lines {
-                self.lines_text = self.draft.departures.lines.join(", ");
+            if parse_lines(lines_text) != departures.lines {
+                *lines_text = departures.lines.join(", ");
             }
             ui.label(tr("Lines (comma separated, blank for all)"));
             if ui
                 .add(
-                    egui::TextEdit::singleline(&mut self.lines_text)
+                    egui::TextEdit::singleline(lines_text)
                         .hint_text("31, 37")
                         .desired_width(240.0),
                 )
                 .changed()
             {
-                self.draft.departures.lines = parse_lines(&self.lines_text);
+                departures.lines = parse_lines(lines_text);
             }
             ui.label(tr("Direction (comma separated, blank for all)"));
             ui.add(
-                egui::TextEdit::singleline(&mut self.draft.departures.direction)
+                egui::TextEdit::singleline(&mut departures.direction)
                     .hint_text("Sentrum, Helsfyr")
                     .desired_width(240.0),
             );
@@ -941,24 +1031,19 @@ impl Dashboard {
             );
             ui.horizontal(|ui| {
                 ui.label(tr("Refresh (seconds)"));
-                ui.add(
-                    egui::DragValue::new(&mut self.draft.departures.refresh_secs).range(30..=3600),
-                );
+                ui.add(egui::DragValue::new(&mut departures.refresh_secs).range(30..=3600));
             });
         });
         ui.add_space(12.0);
         style::group(ui, |ui| {
             ui.label(egui::RichText::new(tr("Traffic")).size(16.0).strong());
             ui.checkbox(
-                &mut self.draft.departures.road_traffic,
+                &mut departures.road_traffic,
                 tr("Read road situations along the route from Statens vegvesen"),
             );
             ui.horizontal(|ui| {
                 ui.label(tr("Counts situations within (metres)"));
-                ui.add(
-                    egui::DragValue::new(&mut self.draft.departures.traffic_radius_m)
-                        .range(50..=2000),
-                );
+                ui.add(egui::DragValue::new(&mut departures.traffic_radius_m).range(50..=2000));
             });
             ui.colored_label(
                 style::MUTED,
@@ -1273,7 +1358,7 @@ fn description(kind: Kind) -> &'static str {
         Kind::Calendar => tr("What is on now and what comes next"),
         Kind::Mail => tr("Unread count and rotating message subjects"),
         Kind::NowPlaying => tr("Track, artist and playback state from Windows media"),
-        Kind::Departures => tr("Next bus, tram, metro, train or boat, with a traffic level"),
+        Kind::Departures(_) => tr("Next bus, tram, metro, train or boat, with a traffic level"),
         Kind::News => tr("Rotating headlines from news feeds you choose"),
         Kind::Usage(_) => tr("Usage limits and reset times"),
     }
@@ -1283,7 +1368,7 @@ fn setup(p: codezeno_usage_core::providers::ProviderId) -> &'static str {
     match p{Claude=>tr("Sign in with Claude Code or the Claude desktop app."),Codex=>tr("Sign in with the Codex CLI or desktop app."),Antigravity=>tr("Sign in with the Antigravity CLI."),OpenCode=>tr("Use OPENCODE_GO_WORKSPACE_ID and OPENCODE_GO_AUTH_COOKIE, or OpenCode Go’s config.json."),Cursor=>tr("Sign in with Cursor. Its local session is detected automatically."),Grok=>tr("Run grok login to sign in with your xAI account."),Copilot=>tr("Sign in with the Copilot CLI or GitHub CLI (gh auth login).")}
 }
 fn validate(c: &Config) -> Result<(), String> {
-    for kind in Kind::ALL {
+    for kind in crate::app::user_facing_kinds(c) {
         kind.state(c)
             .double_click
             .resolve(kind, c)
@@ -1320,10 +1405,15 @@ fn validate(c: &Config) -> Result<(), String> {
     {
         return Err(tr("Choose a weather refresh from 1800–86400 seconds, mail/calendar refresh from 30–86400 seconds, and subject rotation from 1–3600 seconds.").into());
     }
-    if !(30..=3600).contains(&c.departures.refresh_secs)
-        || !(50..=2000).contains(&c.departures.traffic_radius_m)
-    {
-        return Err(tr("Choose a departure refresh from 30–3600 seconds and a traffic radius from 50–2000 metres.").into());
+    for slot in 0..config::DEPARTURE_SLOTS {
+        let Some(departures) = c.departures_for(slot) else {
+            continue;
+        };
+        if !(30..=3600).contains(&departures.refresh_secs)
+            || !(50..=2000).contains(&departures.traffic_radius_m)
+        {
+            return Err(tr("Choose a departure refresh from 30–3600 seconds and a traffic radius from 50–2000 metres.").into());
+        }
     }
     if !(300..=86400).contains(&c.news.refresh_secs)
         || !(3..=600).contains(&c.news.rotate_secs)
@@ -1370,18 +1460,24 @@ fn settings_for_save(base: &Config, draft: &Config, page: Page, all: bool) -> Co
         Page::Weather => selected.weather = draft.weather.clone(),
         Page::Calendar => selected.calendar = draft.calendar.clone(),
         Page::Mail => selected.mail = draft.mail.clone(),
-        Page::Departures => selected.departures = draft.departures.clone(),
+        Page::Departures => {
+            selected.departures = draft.departures.clone();
+            selected.departure_slots = draft.departure_slots.clone();
+        }
         Page::News => selected.news = draft.news.clone(),
         _ => {}
     }
-    for kind in Kind::ALL {
+    for kind in crate::app::user_facing_kinds(draft) {
+        if !kind.exists(&selected) {
+            continue;
+        }
         let include = match page {
             Page::Widgets => true,
             Page::Weather => kind == Kind::Weather,
             Page::Calendar => kind == Kind::Calendar,
             Page::Mail => kind == Kind::Mail,
             Page::NowPlaying => kind == Kind::NowPlaying,
-            Page::Departures => kind == Kind::Departures,
+            Page::Departures => matches!(kind, Kind::Departures(_)),
             Page::News => kind == Kind::News,
             Page::Usage => matches!(kind, Kind::Usage(_)),
             _ => false,
@@ -1402,7 +1498,43 @@ fn parse_lines(text: &str) -> Vec<String> {
 }
 
 fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
-    for kind in Kind::ALL {
+    for slot in 1..config::DEPARTURE_SLOTS {
+        match (
+            base.departure_slots.get(&slot),
+            draft.departure_slots.get(&slot),
+        ) {
+            (Some(_), None) => {
+                latest.departure_slots.remove(&slot);
+            }
+            (None, Some(added)) => {
+                latest.departure_slots.insert(slot, added.clone());
+            }
+            (Some(before), Some(edited)) => {
+                if let Some(current) = latest.departure_slots.get_mut(&slot) {
+                    macro_rules! merge { ($($field:ident),+) => { $(
+                        if edited.departures.$field != before.departures.$field {
+                            current.departures.$field = edited.departures.$field.clone();
+                        }
+                    )+ } }
+                    merge!(
+                        name,
+                        stop,
+                        favorites,
+                        lines,
+                        direction,
+                        refresh_secs,
+                        road_traffic,
+                        traffic_radius_m
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    for kind in crate::app::user_facing_kinds(draft) {
+        if !kind.exists(latest) {
+            continue;
+        }
         kind.state(draft).double_click.merge_into(
             &kind.state(base).double_click,
             &mut kind.state_mut(latest).double_click,
@@ -1432,6 +1564,7 @@ fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
     );
     fields!(
         departures,
+        name,
         stop,
         favorites,
         lines,
@@ -1453,6 +1586,166 @@ fn merge_settings(latest: &mut Config, base: &Config, draft: &Config) {
 mod tests {
     use super::*;
 
+    fn fixture() -> Dashboard {
+        let cfg = Config::default();
+        Dashboard {
+            cfg: std::sync::Arc::new(std::sync::Mutex::new(cfg.clone())),
+            base: cfg.clone(),
+            draft: cfg.clone(),
+            page: Page::Widgets,
+            search: PlaceSearch::default(),
+            stop_search: Default::default(),
+            new_feed: Default::default(),
+            lines_text: String::new(),
+            dep_slot: 0,
+            notice: None,
+            test: None,
+            test_configuration: None,
+            studio: Studio::new(Kind::Weather, &cfg),
+            preview_frame: 0,
+            hooked: false,
+            close_prompt: false,
+            last_refresh: std::time::Instant::now(),
+            action_focus: None,
+        }
+    }
+
+    #[test]
+    fn departure_slot_selection_and_page_fit_with_six_slots() {
+        use crate::cpu_render::{self, Canvas, Textures};
+        let mut dashboard = fixture();
+        for _ in 1..config::DEPARTURE_SLOTS {
+            dashboard.draft.add_departure_slot();
+        }
+        dashboard.draft.departures_for_mut(1).unwrap().lines = vec!["31".into()];
+        dashboard.draft.departures_for_mut(2).unwrap().lines = vec!["5".into()];
+        dashboard.select_departure_slot(1);
+        assert_eq!(dashboard.lines_text, "31");
+        dashboard.lines_text.push(',');
+        dashboard.select_departure_slot(2);
+        assert_eq!(dashboard.lines_text, "5");
+        assert_eq!(dashboard.draft.departures_for(1).unwrap().lines, ["31"]);
+        assert!(dashboard.dirty());
+        let ctx = egui::Context::default();
+        style::configure(&ctx);
+        let mut textures = Textures::default();
+        for language in [
+            crate::i18n::Language::English,
+            crate::i18n::Language::Norwegian,
+        ] {
+            crate::i18n::apply(language);
+            for width in [440, 820] {
+                for _ in 0..3 {
+                    let output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width as f32, 1400.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            egui::Frame::new()
+                                .fill(style::SURFACE)
+                                .inner_margin(20)
+                                .show(ui, |ui| {
+                                    dashboard.departures(ui);
+                                    assert!(
+                                        ui.min_rect().right() <= width as f32 + 1.0,
+                                        "departure page overflows at {width}"
+                                    );
+                                });
+                        },
+                    );
+                    textures.set(&output.textures_delta);
+                    let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
+                    assert!(!primitives.is_empty());
+                    if let Some(dir) = std::env::var_os("BTW_DEPARTURE_SHOT_DIR") {
+                        let mut canvas = Canvas::new(width, 1400);
+                        cpu_render::paint(
+                            &mut canvas,
+                            &primitives,
+                            &textures,
+                            output.pixels_per_point,
+                        );
+                        let pixels: Vec<u8> = canvas.pixels.iter().flat_map(|p| *p).collect();
+                        let dir = std::path::PathBuf::from(dir);
+                        std::fs::create_dir_all(&dir).unwrap();
+                        image::save_buffer(
+                            dir.join(format!("departures-{language:?}-{width}.png")),
+                            &pixels,
+                            width as u32,
+                            1400,
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                    }
+                    textures.free(output.textures_delta);
+                }
+            }
+        }
+        crate::i18n::apply(crate::i18n::Language::English);
+        dashboard.draft.remove_departure_slot(2);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| dashboard.departures(ui));
+        output.textures_delta.clear();
+        assert_eq!(dashboard.dep_slot, 0);
+        assert_eq!(dashboard.lines_text, "");
+    }
+
+    #[test]
+    fn departure_page_saves_and_discards_slots_without_other_pages() {
+        let base = Config::default();
+        let mut draft = base.clone();
+        let slot = draft.add_departure_slot().unwrap();
+        draft.departures_for_mut(slot).unwrap().name = "Metro".into();
+        draft.departures_for_mut(slot).unwrap().lines = vec!["5".into()];
+        Kind::Departures(slot)
+            .state_mut(&mut draft)
+            .double_click
+            .action = Some(crate::click_action::Action::OpenUrl);
+        draft.mail.username = "pending".into();
+        let selected = settings_for_save(&base, &draft, Page::Departures, false);
+        assert_eq!(selected.departure_slots, draft.departure_slots);
+        assert_eq!(selected.mail, base.mail);
+        let discarded = settings_for_save(&draft, &base, Page::Departures, false);
+        assert!(discarded.departure_slots.is_empty());
+        assert_eq!(discarded.mail.username, "pending");
+    }
+
+    #[test]
+    fn departure_slot_merge_preserves_concurrent_positions_and_unedited_settings() {
+        let mut base = Config::default();
+        base.add_departure_slot();
+        base.add_departure_slot();
+        base.add_departure_slot();
+        let mut draft = base.clone();
+        draft.departures_for_mut(1).unwrap().name = "Bus".into();
+        draft.departures.name = "Home".into();
+        draft.remove_departure_slot(2);
+        let mut latest = base.clone();
+        Kind::Departures(1).state_mut(&mut latest).x = 900;
+        latest.departures_for_mut(1).unwrap().direction = "External".into();
+        latest.departures_for_mut(3).unwrap().lines = vec!["31".into()];
+        merge_settings(&mut latest, &base, &draft);
+        assert_eq!(latest.departures.name, "Home");
+        assert_eq!(latest.departures_for(1).unwrap().name, "Bus");
+        assert_eq!(latest.departures_for(1).unwrap().direction, "External");
+        assert_eq!(Kind::Departures(1).state(&latest).x, 900);
+        assert!(!Kind::Departures(2).exists(&latest));
+        assert_eq!(latest.departures_for(3).unwrap().lines, ["31"]);
+        // A concurrent removal is not undone by an unrelated settings save.
+        latest.remove_departure_slot(1);
+        merge_settings(&mut latest, &base, &draft);
+        assert!(!Kind::Departures(1).exists(&latest));
+    }
+
+    #[test]
+    fn every_slot_is_validated() {
+        let mut c = Config::default();
+        let slot = c.add_departure_slot().unwrap();
+        c.departures_for_mut(slot).unwrap().refresh_secs = 5;
+        assert!(validate(&c).is_err());
+    }
     #[test]
     fn a_comma_typed_in_lines_survives_until_the_next_number() {
         // The Lines box frame by frame, as `departures` runs it: the reset
@@ -1485,26 +1778,7 @@ mod tests {
             click_action::Action,
             cpu_render::{self, Canvas, Textures},
         };
-        let cfg = Config::default();
-        let mut dashboard = Dashboard {
-            cfg: std::sync::Arc::new(std::sync::Mutex::new(cfg.clone())),
-            base: cfg.clone(),
-            draft: cfg.clone(),
-            page: Page::Widgets,
-            search: PlaceSearch::default(),
-            stop_search: Default::default(),
-            new_feed: Default::default(),
-            lines_text: String::new(),
-            notice: None,
-            test: None,
-            test_configuration: None,
-            studio: Studio::new(Kind::Weather, &cfg),
-            preview_frame: 0,
-            hooked: false,
-            close_prompt: false,
-            last_refresh: std::time::Instant::now(),
-            action_focus: None,
-        };
+        let mut dashboard = fixture();
         dashboard.draft.calendar_widget.double_click.action = Some(Action::Refresh);
         dashboard.draft.mail_widget.double_click.action = Some(Action::LaunchApp);
         dashboard.draft.mail_widget.double_click.app = "C:\\Windows\\System32\\notepad.exe".into();

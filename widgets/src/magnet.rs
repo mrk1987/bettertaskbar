@@ -341,6 +341,9 @@ pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
                 return;
             }
             for (kind, read, offset) in packed {
+                if !kind.exists(c) {
+                    continue;
+                }
                 let state = kind.state_mut(c);
                 // Skip a pill that was dropped again since this pass read it.
                 if state.manual_bar_offset == read && state.placement == Placement::Taskbar {
@@ -348,6 +351,9 @@ pub fn arrange(cfg: &SharedConfig, windows: &[(Kind, HWND)]) {
                 }
             }
             for (kind, side, offset, manual) in inferred {
+                if !kind.exists(c) {
+                    continue;
+                }
                 let state = kind.state_mut(c);
                 if state.dock_side.is_none()
                     && state.tray_offset == offset
@@ -366,7 +372,7 @@ pub fn diagnostics(settings: &config::Config) -> Result<String, String> {
     let mut visible = Vec::new();
     let mut hidden = 0;
     let mut native_overlaps = 0;
-    for kind in Kind::ALL {
+    for kind in crate::app::user_facing_kinds(settings) {
         let state = kind.state(settings);
         if !state.enabled || !state.visible || state.placement != Placement::Taskbar {
             continue;

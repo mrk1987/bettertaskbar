@@ -532,7 +532,7 @@ fn supervise(cfg: &SharedConfig, pills: &mut Vec<Pill>, thread: u32) {
     crate::config::refresh(cfg);
     let settings = cfg.lock().unwrap().clone();
     for kind in Kind::ALL {
-        let enabled = kind.state(&settings).enabled;
+        let enabled = kind.exists(&settings) && kind.state(&settings).enabled;
         match pills.iter().position(|p| p.kind == kind) {
             None if enabled => match Pill::new(kind, cfg.clone(), thread) {
                 Some(pill) => pills.push(pill),
@@ -624,6 +624,9 @@ pub fn run(cfg: SharedConfig, tray: &std::thread::JoinHandle<()>) {
 /// window and writes no settings.
 pub fn shot(kind: Kind, path: &str, wait: Duration, scale: f32) -> Result<(), String> {
     let cfg = crate::config::shared();
+    if !kind.exists(&cfg.lock().unwrap()) {
+        return Err(format!("Unknown widget: {}", kind.key()));
+    }
     let mut app = WidgetApp::new_in_process(kind, cfg);
     let mut painter = Painter::new(app.size_hint());
     let start = Instant::now();
@@ -706,7 +709,7 @@ mod tests {
                 Kind::Mail,
                 Box::new(crate::widgets::mail::MailWidget::sample(cfg.clone())),
             ),
-            (Kind::Departures, Box::new(DeparturesWidget::sample())),
+            (Kind::Departures(0), Box::new(DeparturesWidget::sample())),
             (Kind::News, Box::new(NewsWidget::sample(cfg.clone()))),
             (Kind::NowPlaying, Box::new(NowPlayingWidget::sample())),
             (
