@@ -101,7 +101,19 @@ fn cached_tone(
     light
 }
 
+fn parse_force_light_bar(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+/// Screenshot/test aid; only the exact value `1` overrides Windows' tone.
+pub fn force_light_bar() -> bool {
+    parse_force_light_bar(std::env::var("BTW_FORCE_LIGHT_BAR").ok().as_deref())
+}
+
 pub fn taskbar_is_light() -> bool {
+    if force_light_bar() {
+        return true;
+    }
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     cached_tone(&mut cache, Instant::now(), read_taskbar_is_light)
 }
@@ -109,6 +121,22 @@ pub fn taskbar_is_light() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn force_light_bar_requires_exactly_one() {
+        assert!(parse_force_light_bar(Some("1")));
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some(" 1"),
+            Some("1 "),
+            Some("01"),
+        ] {
+            assert!(!parse_force_light_bar(value), "{value:?}");
+        }
+    }
 
     #[test]
     fn black_and_white_contrast_is_twenty_one() {

@@ -670,7 +670,9 @@ mod tests {
     /// The README banner's pills, drawn by the real pill code from fixed
     /// sample data at 2x. Runs only with `BTW_BANNER_DIR=<folder>`, which
     /// receives one transparent PNG per pill; `docs/make_banner.py` lays them
-    /// out. Needs network once, for the public Yr weather symbol.
+    /// out. With `BTW_FORCE_LIGHT_BAR=1`, composites onto #F3F3F3 instead.
+    /// Needs network once for the public Yr weather symbol, unless
+    /// `BTW_BANNER_WEATHER_ICON` points to a local copy of that SVG.
     #[test]
     fn readme_banner() {
         use crate::widgets::{
@@ -692,13 +694,17 @@ mod tests {
         crate::i18n::apply(config.language);
         let cfg: crate::config::SharedConfig = std::sync::Arc::new(std::sync::Mutex::new(config));
         let icon_url = WeatherWidget::sample_icon_url();
-        let icon = crate::http::agent()
-            .get(&icon_url)
-            .call()
-            .expect("weather symbol")
-            .body_mut()
-            .read_to_vec()
-            .expect("weather symbol bytes");
+        let icon = if let Some(path) = std::env::var_os("BTW_BANNER_WEATHER_ICON") {
+            std::fs::read(path).expect("local weather symbol bytes")
+        } else {
+            crate::http::agent()
+                .get(&icon_url)
+                .call()
+                .expect("weather symbol")
+                .body_mut()
+                .read_to_vec()
+                .expect("weather symbol bytes")
+        };
         let pills: Vec<(Kind, Box<dyn Widget>)> = vec![
             (Kind::Weather, Box::new(WeatherWidget::sample())),
             (
@@ -740,7 +746,20 @@ mod tests {
             for _ in 0..8 {
                 canvas = Some(painter.frame(&mut app, None, Vec::new(), 2.0).0);
             }
-            let canvas = canvas.unwrap();
+            let mut canvas = canvas.unwrap();
+            if crate::tone::force_light_bar() {
+                // Canvas channels are premultiplied: source-over a light bar.
+                for pixel in &mut canvas.pixels {
+                    let [r, g, b, a] = *pixel;
+                    let under = ((0xF3_u16 * (255 - u16::from(a))) / 255) as u8;
+                    *pixel = [
+                        r.saturating_add(under),
+                        g.saturating_add(under),
+                        b.saturating_add(under),
+                        255,
+                    ];
+                }
+            }
             let pixels: Vec<u8> = canvas.pixels.iter().flatten().copied().collect();
             image::save_buffer(
                 dir.join(format!("{}.png", kind.key())),

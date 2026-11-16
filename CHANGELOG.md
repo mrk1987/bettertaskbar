@@ -3,6 +3,22 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Several Next Departure pills: one by default, up to six. Each pill has its
+  own stop, lines, direction, position, double-click action and optional name.
+  Manage them with the `1` `2` … `+` row on the dashboard's **Next Departure**
+  page. An existing setup becomes pill 1.
+
+### Changed
+
+- Docked pills use dark text on a light taskbar or a light accent colour, and
+  follow a Windows theme change within a few seconds. Floating pills and
+  custom Studio themes keep their colours.
+- Next Departure is slightly wider, so every traffic level fits in Norwegian.
+
 ## 1.1.2 - 2026-11-15
 
 ### Added

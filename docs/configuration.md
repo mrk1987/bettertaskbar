@@ -47,9 +47,74 @@ their last settings and leave the file alone.
 The settings for each widget are described on its own page:
 [weather](weather.md), [calendar](calendar.md), [mail](mail.md),
 [now playing](now-playing.md) (`now_playing_widget`, no settings),
-[next departure](departures.md) (`departures`, `departures_widget`) and
-[news](news.md) (`news`, `news_widget`). The last three are off until switched
+[next departure](departures.md) (`departures`, `departures_widget`,
+`departure_slots`) and [news](news.md) (`news`, `news_widget`). The last three are off until switched
 on.
+
+## Next Departure pills
+
+Pill 1 uses `departures` and `departures_widget` as before. `departures` has a
+new `name` field, empty by default. A name replaces the stop name in the tray
+menu, dashboard widget list and slot hover text.
+
+Pills 2-6 are objects in `departure_slots`, keyed `"1"` to `"5"`. Each holds a
+`departures` object and a `widget` object with the same fields as pill 1's:
+
+```json
+"departure_slots": {
+  "1": {
+    "departures": {
+      "name": "Buses",
+      "stop": { "id": "NSR:StopPlace:58366", "name": "Jernbanetorget, Oslo", "lat": 59.9119, "lon": 10.7504 },
+      "favorites": [],
+      "lines": ["31"],
+      "direction": "",
+      "refresh_secs": 60,
+      "road_traffic": true,
+      "traffic_radius_m": 300
+    },
+    "widget": { "enabled": true, "placement": "taskbar", "visible": true, "x": 24, "y": 24, "tray_offset": 8, "monitor": null }
+  }
+}
+```
+
+New pills start disabled. Enable them under **Widgets** after saving. The
+example above sets `enabled` to `true` to start pill 2; `visible` alone only
+controls whether an enabled pill is shown.
+
+A key that is missing has no pill: no window is started, and the tray menu,
+Widgets page and Theme Studio do not list it. Removing a pill deletes its key
+and does not move the others. Key `"1"` is the window
+`BetterTaskbar Next Departure 2`, and so on.
+
+## Taskbar text
+
+A docked pill has no background of its own, so its text follows the taskbar
+colour Windows reports: dark text on a light taskbar or a light accent colour,
+light text on a dark one. A change shows within a few seconds. Floating pills
+keep their dark card and light text, and a custom Studio theme keeps its own
+colours.
+
+Set `BTW_FORCE_LIGHT_BAR=1` in the process environment to make docked pills
+using the built-in layout use light-taskbar colours, whatever Windows reports.
+Only the exact value `1` forces light mode; other values keep Windows detection.
+It is a test aid for screenshots and checks. Floating pills keep their colours.
+
+For off-screen PNGs from fixed sample data, build first, then run this from
+`widgets/` in PowerShell (the output directory must exist):
+
+```powershell
+cargo build
+$env:BTW_FORCE_LIGHT_BAR = "1"
+$env:BTW_BANNER_DIR = "C:/Temp/btw-light"
+$env:BTW_BANNER_LANGUAGE = "norwegian" # or "english"
+cargo test readme_banner -- --test-threads=1
+```
+
+This writes one PNG per sample pill over `#F3F3F3`, without loading or saving
+your settings. It fetches the public Yr weather symbol. It does not update
+`docs/banner.png`. To use a local copy of the sample weather SVG instead of
+fetching it, set `BTW_BANNER_WEATHER_ICON` to its path.
 
 ## Placement
 

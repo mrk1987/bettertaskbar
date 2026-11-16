@@ -12,8 +12,8 @@ or boat, so the text gives only the line. A stop served by several modes
 changes icon as the next departure changes. The countdown runs live between
 refreshes. A delay of two minutes or more is added after the countdown
 (`6 min +3`). A departure an hour or more away shows its clock time. Cancelled
-departures say so. The pill keeps one width; a longer line, such as one with a
-delay, scrolls.
+departures say so. The pill keeps one width, wide enough for the longest traffic
+level; a longer line, such as one with a delay, scrolls.
 
 Off by default. Switch it on under **Widgets** in the dashboard.
 
@@ -21,6 +21,9 @@ Off by default. Switch it on under **Widgets** in the dashboard.
 
 Open the dashboard's **Next Departure** page:
 
+- **Name:** optional. It replaces the stop name in the tray menu and the
+  dashboard widget list and slot hover text. Blank uses the stop name. With
+  no stop, pill 1 uses `Next Departure`; pills 2-6 use `Next Departure N`.
 - **Find a stop:** search by name. Choosing a result selects it and saves it
   under **Saved stops**. Switch between saved stops from the widget's
   right-click **Stop** menu.
@@ -38,6 +41,7 @@ In [widgets.json](configuration.md) the settings are under `departures`:
 
 ```json
 "departures": {
+  "name": "",
   "stop": { "id": "NSR:StopPlace:58366", "name": "Jernbanetorget, Oslo", "lat": 59.9119, "lon": 10.7504 },
   "favorites": [],
   "lines": ["31"],
@@ -47,6 +51,27 @@ In [widgets.json](configuration.md) the settings are under `departures`:
   "traffic_radius_m": 300
 }
 ```
+
+Pills 2-6 have the same fields in `departure_slots`. See
+[configuration](configuration.md#next-departure-pills).
+
+## Several pills
+
+One Next Departure pill exists by default, switched off under **Widgets**.
+Add up to five more on the **Next Departure** page, with the `+` in the row
+`1` `2` … `+` above the stop settings.
+
+- `1`…`6` switches the page to that pill.
+- `+` adds a pill and selects it. It is disabled at six.
+- **Remove this pill** removes the selected pill. Pill 1 cannot be removed,
+  and a removed pill leaves the others where they are. The removal is saved
+  with **Save changes**.
+
+Each pill has its own stop, saved stops, lines, direction, refresh,
+road-traffic settings, position, double-click action, theme and name. The tray
+menu, the Widgets page and Theme Studio list the pills that exist.
+
+New pills start disabled. Save the page, then switch them on under **Widgets**.
 
 ## The traffic level
 

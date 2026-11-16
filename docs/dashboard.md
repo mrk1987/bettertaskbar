@@ -26,6 +26,16 @@ unrelated changes made by another process. Failed writes are shown as errors.
 **Test connection** checks the entered settings without saving them. Mail uses
 read-only IMAP commands; calendar checks list upcoming events.
 
+On the **Next Departure** page, the row `1` `2` … `+` above the stop settings
+switches between pills and adds a pill. **Remove this pill** removes the
+selected extra pill. There can be up to six pills; pill 1 cannot be removed.
+Adding and removing are saved
+with **Save changes**, like other edits on the page. Each pill has its own
+stop, lines, direction, name and placement. See
+[Next Departure](departures.md#several-pills).
+
+New pills start disabled; save them, then enable them under **Widgets**.
+
 ## Double-click actions
 
 Expand **Double-click** under any widget on the Widgets or Usage page, or use
