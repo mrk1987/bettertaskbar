@@ -2,6 +2,10 @@
 //! for the glossary. Generated once from a list; edit it here directly.
 
 pub static NB: &[(&str, &str)] = &[
+    ("This pill no longer exists.", "Denne finnes ikke lenger."),
+    ("Remove this pill", "Fjern denne"),
+    ("Shown in the tray and dashboard; empty uses the stop name", "Vises i systemfeltet og kontrollpanelet; tomt felt bruker holdeplassnavnet"),
+    ("Next Departure {n}", "Neste avgang {n}"),
     ("General", "Generelt"),
     ("Widgets", "Widgets"),
     ("Weather", "Vær"),

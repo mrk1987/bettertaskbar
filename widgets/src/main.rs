@@ -105,6 +105,9 @@ fn run_widget(kind: app::Kind) {
     std::env::set_var("WGPU_BACKEND", "dx12");
     std::env::set_var("WGPU_DX12_PRESENTATION_SYSTEM", "visual");
     let cfg = config::shared();
+    if !kind.exists(&cfg.lock().unwrap()) {
+        return;
+    }
     let app = app::WidgetApp::new(kind, cfg);
     let (w, h) = app.size_hint();
     let title = app.window_title();
@@ -208,7 +211,7 @@ fn supervise(exe: &std::path::Path, cfg: config::SharedConfig) {
         config::refresh(&cfg);
         let settings = cfg.lock().unwrap().clone();
         for (kind, child) in &mut children {
-            if !kind.state(&settings).enabled {
+            if !kind.exists(&settings) || !kind.state(&settings).enabled {
                 if let Some(mut running) = child.take() {
                     let _ = running.kill();
                     let _ = running.wait();
@@ -289,6 +292,10 @@ fn check_taskbar() -> String {
 fn check(what: &str) -> i32 {
     let cfg = config::shared();
     let cfg = cfg.lock().unwrap();
+    let departure = app::user_facing_kinds(&cfg).find_map(|k| match k {
+        app::Kind::Departures(slot) if k.key() == what => Some(slot),
+        _ => None,
+    });
     let outcome = match what {
         "calendar" => caldav::fetch(&cfg.calendar).map(|f| {
             format!(
@@ -314,7 +321,8 @@ fn check(what: &str) -> i32 {
             )
         }),
         "taskbar" => Ok(check_taskbar()),
-        "departures" => widgets::departures::fetch(&cfg.departures).map(|board| {
+        _ if departure.is_some() => {
+            widgets::departures::fetch(cfg.departures_for(departure.unwrap()).unwrap()).map(|board| {
             let now = chrono::Utc::now();
             let mut out = format!(
                 "{}: traffic {} ({})",
@@ -332,7 +340,8 @@ fn check(what: &str) -> i32 {
                 ));
             }
             out
-        }),
+        })
+        },
         "now-playing" => widgets::now_playing::read_once().map(|track| match track {
             Some(t) => format!("{} — {} ({:?}) from {}", t.title, t.artist, t.state, t.app),
             None => "Nothing is reporting media playback.".into(),

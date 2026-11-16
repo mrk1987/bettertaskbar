@@ -39,8 +39,7 @@ fn state(hwnd: HWND) -> &'static TrayState {
 
 /// The placement every enabled widget shares, if they all share one.
 pub(crate) fn common_placement(c: &crate::config::Config) -> Option<Placement> {
-    let mut enabled = Kind::ALL
-        .into_iter()
+    let mut enabled = crate::app::user_facing_kinds(c)
         .map(|k| k.state(c))
         .filter(|s| s.enabled)
         .map(|s| s.placement);
@@ -66,7 +65,7 @@ fn command(hwnd: HWND, id: usize) {
                 ID_DESKTOP_ALL => Placement::Desktop,
                 _ => Placement::Floating,
             };
-            for kind in Kind::ALL {
+            for kind in crate::app::user_facing_kinds(c).collect::<Vec<_>>() {
                 kind.state_mut(c).placement = placement;
             }
         }
@@ -74,6 +73,9 @@ fn command(hwnd: HWND, id: usize) {
             let Some(kind) = id.checked_sub(ID_WIDGET).and_then(|i| Kind::ALL.get(i)) else {
                 return;
             };
+            if !kind.exists(c) {
+                return;
+            }
             let state = kind.state_mut(c);
             if !state.enabled {
                 state.enabled = true;
@@ -111,13 +113,13 @@ fn show_menu(hwnd: HWND) {
         };
         add(menu, MF_STRING, ID_DASHBOARD, tr("Dashboard…"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        for kind in Kind::ALL {
+        for kind in crate::app::user_facing_kinds(&cfg) {
             let state = kind.state(&cfg);
             let on = check(state.enabled && state.visible);
             let id = ID_WIDGET + kind.index();
             match kind {
                 Kind::Usage(_) => add(usage, on, id, kind.label()),
-                _ => add(menu, on, id, kind.label()),
+                _ => add(menu, on, id, &kind.display_name(&cfg)),
             }
         }
         labels.push(wide(tr("AI usage")));

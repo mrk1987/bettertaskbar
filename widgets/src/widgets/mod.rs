@@ -74,7 +74,7 @@ pub fn poll<C, T>(
     tag: &'static str,
     cfg: SharedConfig,
     tx: Sender<Update<T>>,
-    pick: fn(&Config) -> (C, u64, bool),
+    pick: impl Fn(&Config) -> (C, u64, bool) + Send + 'static,
     fetch: fn(&C) -> Result<(T, String), String>,
 ) -> RefreshRequest
 where

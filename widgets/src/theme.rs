@@ -242,7 +242,7 @@ pub fn sample(kind: crate::app::Kind) -> Values {
         Kind::Calendar => (tr("Now: Project review"), tr("Next: Team meeting · 14:30")),
         Kind::Mail => (tr("Design review notes"), tr("5 unread")),
         Kind::NowPlaying => ("Running Up That Hill", "Kate Bush"),
-        Kind::Departures => ("31 · 6 min", tr("Traffic: High")),
+        Kind::Departures(_) => ("31 · 6 min", tr("Traffic: High")),
         Kind::News => (tr("Storting agrees on next year's budget"), "NRK · 12 min"),
         _ => (
             tr("Session: 34% used · 2h 15m"),
@@ -267,7 +267,7 @@ pub fn sample(kind: crate::app::Kind) -> Values {
         ],
         Kind::Mail => &[("count", "5")],
         Kind::NowPlaying => &[("state", tr("Playing")), ("artist", "Kate Bush")],
-        Kind::Departures => &[
+        Kind::Departures(_) => &[
             ("traffic", tr("High")),
             ("mode", tr("Bus")),
             ("line", "31"),
@@ -287,7 +287,7 @@ pub fn sample(kind: crate::app::Kind) -> Values {
         Kind::Mail => Icon::Mail.key().into(),
         Kind::News => Icon::News.key().into(),
         Kind::NowPlaying => Icon::Music { paused: false }.key().into(),
-        Kind::Departures => Icon::Transit(Transit::Bus).key().into(),
+        Kind::Departures(_) => Icon::Transit(Transit::Bus).key().into(),
     };
     values.insert("icon".into(), icon);
     values
