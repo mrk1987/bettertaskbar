@@ -3,7 +3,7 @@
 Notable changes to BetterTaskbar. Versions follow
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.2.0 - 2026-11-16
 
 ### Added
 
@@ -18,6 +18,8 @@ Notable changes to BetterTaskbar. Versions follow
   follow a Windows theme change within a few seconds. Floating pills and
   custom Studio themes keep their colours.
 - Next Departure is slightly wider, so every traffic level fits in Norwegian.
+- The Weather pill writes the day's high and low as `12° / 6°`, as a themed
+  pill does.
 
 ## 1.1.2 - 2026-11-15
 

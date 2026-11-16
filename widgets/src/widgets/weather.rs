@@ -405,12 +405,14 @@ impl Widget for WeatherWidget {
                 match &self.latest {
                     Some(d) => {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(5.0, 0.0);
+                            ui.spacing_mut().item_spacing = egui::vec2(3.0, 0.0);
                             ui.label(
                                 egui::RichText::new(format!("{:.0}°", d.hi))
                                     .color(temp_color(d.hi, crate::app::on_light(ui)))
                                     .size(12.0),
                             );
+                            // High / low, as the themed pill writes it.
+                            ui.label(egui::RichText::new("/").weak().size(12.0));
                             ui.label(
                                 egui::RichText::new(format!("{:.0}°", d.lo))
                                     .color(temp_color(d.lo, crate::app::on_light(ui)))
